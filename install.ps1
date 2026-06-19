@@ -99,5 +99,5 @@ if (-not $NoLaunch) {
 Write-Host 'LLM Usage Monitor をインストールしました。'
 Write-Host ('インストール先: {0}' -f $installDir)
 if (-not $SkipClaudeConfiguration) {
-    Write-Host 'Claude Desktop Code の利用状況はバックグラウンドで5分ごとに更新されます。'
+    Write-Host 'Claude Desktop Code の利用状況は既定で5分ごとに更新されます。'
 }

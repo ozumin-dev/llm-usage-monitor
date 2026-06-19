@@ -60,9 +60,9 @@
     $claudeValue = New-Object System.Windows.Forms.NumericUpDown
     $claudeValue.Location = New-Object System.Drawing.Point 235, 60
     $claudeValue.Size = New-Object System.Drawing.Size 90, 22
-    $claudeValue.Minimum = 1; $claudeValue.Maximum = 60; $claudeValue.Value = $settings.ClaudeRefreshMinutes
+    $claudeValue.Minimum = 5; $claudeValue.Maximum = 3600; $claudeValue.Value = $settings.ClaudeRefreshSeconds
     $claudeUnit = New-Object System.Windows.Forms.Label
-    $claudeUnit.Text = '分'
+    $claudeUnit.Text = '秒'
     $claudeUnit.Location = New-Object System.Drawing.Point 332, 62
     $updateGroup.Controls.AddRange(@($localLabel, $localValue, $localUnit, $claudeLabel, $claudeValue, $claudeUnit))
 
@@ -112,7 +112,7 @@
             ShowCodexTrayIcon = $codexCheck.Checked
             ShowClaudeTrayIcon = $claudeCheck.Checked
             LocalRefreshSeconds = [int]$localValue.Value
-            ClaudeRefreshMinutes = [int]$claudeValue.Value
+            ClaudeRefreshSeconds = [int]$claudeValue.Value
             ApiEnabled = $apiCheck.Checked
             ApiPort = [int]$portValue.Value
         }

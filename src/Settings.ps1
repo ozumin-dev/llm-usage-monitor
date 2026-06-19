@@ -26,13 +26,18 @@ function Get-MonitorSettings {
     }
 
     $refresh = [int](Get-SettingProperty $data 'local_refresh_seconds' 30)
-    $claudeRefresh = [int](Get-SettingProperty $data 'claude_refresh_minutes' 5)
+    $claudeRefreshValue = Get-SettingProperty $data 'claude_refresh_seconds' $null
+    if ($null -eq $claudeRefreshValue) {
+        # Migrate settings written by versions that stored this value in minutes.
+        $claudeRefreshValue = [int](Get-SettingProperty $data 'claude_refresh_minutes' 5) * 60
+    }
+    $claudeRefresh = [int]$claudeRefreshValue
     $port = [int](Get-SettingProperty $data 'api_port' 47831)
     return [pscustomobject]@{
         ShowCodexTrayIcon = [bool](Get-SettingProperty $data 'show_codex_tray_icon' $true)
         ShowClaudeTrayIcon = [bool](Get-SettingProperty $data 'show_claude_tray_icon' $true)
         LocalRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $refresh))
-        ClaudeRefreshMinutes = [Math]::Max(1, [Math]::Min(60, $claudeRefresh))
+        ClaudeRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $claudeRefresh))
         ApiEnabled = [bool](Get-SettingProperty $data 'api_enabled' $true)
         ApiPort = [Math]::Max(1024, [Math]::Min(65535, $port))
     }
@@ -49,7 +54,7 @@ function Save-MonitorSettings {
         show_codex_tray_icon = [bool]$Settings.ShowCodexTrayIcon
         show_claude_tray_icon = [bool]$Settings.ShowClaudeTrayIcon
         local_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.LocalRefreshSeconds))
-        claude_refresh_minutes = [Math]::Max(1, [Math]::Min(60, [int]$Settings.ClaudeRefreshMinutes))
+        claude_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.ClaudeRefreshSeconds))
         api_enabled = [bool]$Settings.ApiEnabled
         api_port = [Math]::Max(1024, [Math]::Min(65535, [int]$Settings.ApiPort))
     }

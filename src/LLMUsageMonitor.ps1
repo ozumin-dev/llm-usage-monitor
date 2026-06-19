@@ -22,7 +22,7 @@ if (-not $PSBoundParameters.ContainsKey('ApiPort')) { $ApiPort = $monitorSetting
 if (-not $PSBoundParameters.ContainsKey('DisableApi')) { $DisableApi = -not $monitorSettings.ApiEnabled }
 $showCodexTrayIcon = $monitorSettings.ShowCodexTrayIcon
 $showClaudeTrayIcon = $monitorSettings.ShowClaudeTrayIcon
-$claudeRefreshMinutes = $monitorSettings.ClaudeRefreshMinutes
+$claudeRefreshSeconds = $monitorSettings.ClaudeRefreshSeconds
 
 $createdNew = $false
 $mutex = New-Object System.Threading.Mutex($true, 'Local\LLMUsageMonitor', [ref]$createdNew)
@@ -36,6 +36,7 @@ $script:iconSignatures = @{}
 $script:allowExit = $false
 $script:lastAlertBands = @{}
 $script:lastClaudeDesktopPoll = [DateTimeOffset]::MinValue
+$script:claudeUpdateProcess = $null
 $script:apiProcess = $null
 $script:restartRequested = $false
 $startupPath = Get-StartupShortcutPath
@@ -84,8 +85,9 @@ function Set-ProviderTrayIcon {
 
 function Start-ClaudeDesktopUsageUpdate {
     if ($SmokeTest) { return }
+    if ($null -ne $script:claudeUpdateProcess -and -not $script:claudeUpdateProcess.HasExited) { return }
     $now = [DateTimeOffset]::Now
-    if (($now - $script:lastClaudeDesktopPoll).TotalMinutes -lt $claudeRefreshMinutes) { return }
+    if (($now - $script:lastClaudeDesktopPoll).TotalSeconds -lt $claudeRefreshSeconds) { return }
     $script:lastClaudeDesktopPoll = $now
 
     $helper = Join-Path $PSScriptRoot 'claude-desktop-usage.py'
@@ -95,7 +97,7 @@ function Start-ClaudeDesktopUsageUpdate {
     if ($null -eq $python) { return }
 
     $arguments = '"{0}"' -f $helper
-    Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden | Out-Null
+    $script:claudeUpdateProcess = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
 }
 
 function Start-UsageApiServer {
@@ -220,7 +222,6 @@ function Check-UsageAlerts {
 
 function Update-Snapshot {
     try {
-        Start-ClaudeDesktopUsageUpdate
         $script:snapshot = Get-UsageSnapshot
         Save-UsageSnapshot $script:snapshot
         Update-ProviderControls $codexControls $script:snapshot.Codex
@@ -339,8 +340,14 @@ $timer.Interval = [Math]::Max(5, $RefreshSeconds) * 1000
 $timer.Add_Tick({ Update-Snapshot })
 $timer.Start()
 
+$claudeTimer = New-Object System.Windows.Forms.Timer
+$claudeTimer.Interval = [Math]::Max(5, $claudeRefreshSeconds) * 1000
+$claudeTimer.Add_Tick({ Start-ClaudeDesktopUsageUpdate })
+$claudeTimer.Start()
+
 try {
     Start-UsageApiServer
+    Start-ClaudeDesktopUsageUpdate
     Update-Snapshot
     if ($SmokeTest) {
         Write-Host 'LLM Usage Monitor smoke test passed.'
@@ -349,6 +356,7 @@ try {
     }
 } finally {
     $timer.Stop(); $timer.Dispose()
+    $claudeTimer.Stop(); $claudeTimer.Dispose()
     if ($null -ne $script:apiProcess -and -not $script:apiProcess.HasExited) {
         Stop-Process -Id $script:apiProcess.Id -Force -ErrorAction SilentlyContinue
     }
