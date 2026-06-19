@@ -102,7 +102,11 @@ function New-CustomProviderUsageIcon {
 }
 ```
 
-インストール先の `CustomTrayIcon.example.ps1` は、`icons\codex.ico` または `icons\claude.ico` を読み込む最小サンプルです。ファイル名を `CustomTrayIcon.ps1` に変更して利用できます。静的ICOを使うと使用率グラフは表示されなくなるため、動的表示を維持したい場合は渡された使用率を使ってアイコンを生成してください。
+インストール先の `CustomTrayIcon.example.ps1` は、`icons\codex.ico` または `icons\claude.ico` を読み込む最小サンプルです。ファイル名を `CustomTrayIcon.ps1` に変更して利用できます。
+
+このサンプルで読み込める形式はWindowsアイコン（`.ico`）だけです。PNGやSVGはそのままでは使用できません。16×16ピクセルを含む32bit透過のマルチサイズICO（16、20、24、32、48、256ピクセル推奨）を用意してください。
+
+静的ICOを使うと使用率グラフは表示されなくなるため、動的表示を維持したい場合は渡された使用率を使ってアイコンを生成してください。独自の変換処理を `CustomTrayIcon.ps1` に実装し、最終的に `System.Drawing.Icon` を返す場合は、ICO以外の素材も利用できます。
 
 カスタム描画が`$null`を返すかエラーになった場合は、標準アイコンへフォールバックします。`CustomTrayIcon.ps1`と`icons`フォルダーは再インストール時にも削除されません。PowerShellスクリプトとして実行されるため、信頼できるコードだけを配置してください。
 
