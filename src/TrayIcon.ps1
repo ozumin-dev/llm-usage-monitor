@@ -84,14 +84,14 @@ function New-ProviderUsageBitmap {
     $countdownTrackPen = New-Object System.Drawing.Pen $base, (2.4 * $scale)
     $graphics.DrawEllipse($countdownTrackPen, $identityRect)
     $remaining = [Math]::Max(0, [Math]::Min(100, $UpdateRemainingPercent))
-    $activeSegments = [Math]::Min(4, [Math]::Ceiling($remaining / 25))
+    $activeSegments = [Math]::Min(5, [Math]::Ceiling($remaining / 20))
     if ($activeSegments -gt 0) {
         $countdownColor = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
         $countdownPen = New-Object System.Drawing.Pen $countdownColor, (3.2 * $scale)
         $countdownPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
         $countdownPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
         for ($segment = 0; $segment -lt $activeSegments; $segment++) {
-            $graphics.DrawArc($countdownPen, $identityRect, [single](-85 + (90 * $segment)), 70)
+            $graphics.DrawArc($countdownPen, $identityRect, [single](-86 + (72 * $segment)), 52)
         }
         $countdownPen.Dispose()
     }
