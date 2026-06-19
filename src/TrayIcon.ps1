@@ -42,7 +42,7 @@ function New-ProviderUsageBitmap {
         [ValidateSet('Codex', 'Claude')][string]$Provider,
         [Nullable[double]]$FiveHourUsed,
         [Nullable[double]]$WeeklyUsed,
-        [double]$UpdateRemainingPercent = 100,
+        [Nullable[double]]$FiveHourResetRemainingPercent = $null,
         [int]$Size = 32
     )
 
@@ -59,7 +59,7 @@ function New-ProviderUsageBitmap {
         [System.Drawing.ColorTranslator]::FromHtml('#4A2E27')
     }
 
-    # Keep the usage ring inside the countdown markers so both remain legible
+    # Keep the usage ring inside the reset-time markers so both remain legible
     # after Windows scales the tray icon down to 16 px.
     $outerRect = New-Object System.Drawing.RectangleF (6 * $scale), (6 * $scale), (20 * $scale), (20 * $scale)
     $trackPen = New-Object System.Drawing.Pen $track, (4.6 * $scale)
@@ -81,19 +81,27 @@ function New-ProviderUsageBitmap {
     }
 
     $identityRect = New-Object System.Drawing.RectangleF (1.8 * $scale), (1.8 * $scale), (28.4 * $scale), (28.4 * $scale)
-    $countdownTrackPen = New-Object System.Drawing.Pen $base, (2.4 * $scale)
-    $graphics.DrawEllipse($countdownTrackPen, $identityRect)
-    $remaining = [Math]::Max(0, [Math]::Min(100, $UpdateRemainingPercent))
-    $activeSegments = [Math]::Min(5, [Math]::Ceiling($remaining / 20))
-    if ($activeSegments -gt 0) {
-        $countdownColor = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
-        $countdownPen = New-Object System.Drawing.Pen $countdownColor, (3.2 * $scale)
-        $countdownPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
-        $countdownPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $resetTrackColor = if ($null -eq $FiveHourResetRemainingPercent) {
+        [System.Drawing.Color]::FromArgb(120, 130, 140)
+    } else {
+        $base
+    }
+    $resetTrackPen = New-Object System.Drawing.Pen $resetTrackColor, (2.4 * $scale)
+    $resetTrackPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+    $resetTrackPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+    for ($segment = 0; $segment -lt 5; $segment++) {
+        $graphics.DrawArc($resetTrackPen, $identityRect, [single](-86 + (72 * $segment)), 52)
+    }
+    if ($null -ne $FiveHourResetRemainingPercent) {
+        $remaining = [Math]::Max(0, [Math]::Min(100, [double]$FiveHourResetRemainingPercent))
+        $activeSegments = [Math]::Min(5, [Math]::Ceiling($remaining / 20))
+        $resetPen = New-Object System.Drawing.Pen ([System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')), (3.2 * $scale)
+        $resetPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $resetPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
         for ($segment = 0; $segment -lt $activeSegments; $segment++) {
-            $graphics.DrawArc($countdownPen, $identityRect, [single](-86 + (72 * $segment)), 52)
+            $graphics.DrawArc($resetPen, $identityRect, [single](-86 + (72 * $segment)), 52)
         }
-        $countdownPen.Dispose()
+        $resetPen.Dispose()
     }
 
     $innerRect = New-Object System.Drawing.RectangleF (10 * $scale), (10 * $scale), (12 * $scale), (12 * $scale)
@@ -112,7 +120,7 @@ function New-ProviderUsageBitmap {
     $innerPen = New-Object System.Drawing.Pen $base, (1.4 * $scale)
     $graphics.DrawEllipse($innerPen, $innerRect)
 
-    $innerPen.Dispose(); $innerTrackBrush.Dispose(); $countdownTrackPen.Dispose(); $trackPen.Dispose(); $graphics.Dispose()
+    $innerPen.Dispose(); $innerTrackBrush.Dispose(); $resetTrackPen.Dispose(); $trackPen.Dispose(); $graphics.Dispose()
     return $bitmap
 }
 
@@ -121,9 +129,9 @@ function New-ProviderUsageIcon {
         [ValidateSet('Codex', 'Claude')][string]$Provider,
         [Nullable[double]]$FiveHourUsed,
         [Nullable[double]]$WeeklyUsed,
-        [double]$UpdateRemainingPercent = 100
+        [Nullable[double]]$FiveHourResetRemainingPercent = $null
     )
-    $bitmap = New-ProviderUsageBitmap $Provider $FiveHourUsed $WeeklyUsed $UpdateRemainingPercent 32
+    $bitmap = New-ProviderUsageBitmap $Provider $FiveHourUsed $WeeklyUsed $FiveHourResetRemainingPercent 32
     $handle = $bitmap.GetHicon()
     try {
         return [System.Drawing.Icon]::FromHandle($handle).Clone()

@@ -26,6 +26,14 @@ Assert-Equal 71 $claude.ContextUsedPercent 'Claude context percent'
 $missing = Get-ClaudeUsage -Path (Join-Path $fixtureDir 'missing.json')
 Assert-Equal $null $missing 'Missing Claude data'
 
+$resetTestNow = [DateTimeOffset]::FromUnixTimeSeconds(100000)
+$halfWindow = [pscustomobject]@{ ResetsAtEpoch = 109000; WindowMinutes = 300 }
+$expiredWindow = [pscustomobject]@{ ResetsAtEpoch = 99999; WindowMinutes = 300 }
+$unknownResetWindow = [pscustomobject]@{ ResetsAtEpoch = $null; WindowMinutes = 300 }
+Assert-Equal 50 (Get-UsageWindowRemainingPercent $halfWindow $resetTestNow) '5h reset remaining percent'
+Assert-Equal 0 (Get-UsageWindowRemainingPercent $expiredWindow $resetTestNow) 'Expired reset remaining percent'
+Assert-Equal $null (Get-UsageWindowRemainingPercent $unknownResetWindow $resetTestNow) 'Unknown reset remaining percent'
+
 $snapshotPath = Join-Path $env:TEMP ('llm-usage-test-{0}.json' -f $PID)
 try {
     $snapshot = [pscustomobject]@{ Codex = $codex; Claude = $claude; ReadAt = [DateTimeOffset]::Now }

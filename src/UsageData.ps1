@@ -207,6 +207,23 @@ function Test-UsageWindowExpired {
     return $Window.ResetsAtEpoch -le $Now.ToUnixTimeSeconds()
 }
 
+function Get-UsageWindowRemainingPercent {
+    param(
+        $Window,
+        [DateTimeOffset]$Now = [DateTimeOffset]::Now,
+        [int]$DefaultWindowMinutes = 300
+    )
+    if ($null -eq $Window -or $null -eq $Window.ResetsAtEpoch) { return $null }
+    $windowMinutes = if ($null -ne $Window.WindowMinutes -and [int64]$Window.WindowMinutes -gt 0) {
+        [double]$Window.WindowMinutes
+    } else {
+        [double]$DefaultWindowMinutes
+    }
+    if ($windowMinutes -le 0) { return $null }
+    $remainingSeconds = [double]$Window.ResetsAtEpoch - $Now.ToUnixTimeSeconds()
+    return [Math]::Max(0, [Math]::Min(100, ($remainingSeconds / ($windowMinutes * 60)) * 100))
+}
+
 function Format-ResetTime {
     param($Window, [DateTimeOffset]$Now = [DateTimeOffset]::Now)
     if ($null -eq $Window -or $null -eq $Window.ResetsAtEpoch) { return '更新時刻不明' }
