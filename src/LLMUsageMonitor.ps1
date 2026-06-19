@@ -11,8 +11,18 @@ $ErrorActionPreference = 'Stop'
 
 Add-Type -AssemblyName System.Windows.Forms
 Add-Type -AssemblyName System.Drawing
+. (Join-Path $PSScriptRoot 'Settings.ps1')
+. (Join-Path $PSScriptRoot 'SettingsDialog.ps1')
 . (Join-Path $PSScriptRoot 'TrayIcon.ps1')
 [System.Windows.Forms.Application]::EnableVisualStyles()
+
+$monitorSettings = Get-MonitorSettings
+if (-not $PSBoundParameters.ContainsKey('RefreshSeconds')) { $RefreshSeconds = $monitorSettings.LocalRefreshSeconds }
+if (-not $PSBoundParameters.ContainsKey('ApiPort')) { $ApiPort = $monitorSettings.ApiPort }
+if (-not $PSBoundParameters.ContainsKey('DisableApi')) { $DisableApi = -not $monitorSettings.ApiEnabled }
+$showCodexTrayIcon = $monitorSettings.ShowCodexTrayIcon
+$showClaudeTrayIcon = $monitorSettings.ShowClaudeTrayIcon
+$claudeRefreshMinutes = $monitorSettings.ClaudeRefreshMinutes
 
 $createdNew = $false
 $mutex = New-Object System.Threading.Mutex($true, 'Local\LLMUsageMonitor', [ref]$createdNew)
@@ -27,7 +37,8 @@ $script:allowExit = $false
 $script:lastAlertBands = @{}
 $script:lastClaudeDesktopPoll = [DateTimeOffset]::MinValue
 $script:apiProcess = $null
-$startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\LLM Usage Monitor.lnk'
+$script:restartRequested = $false
+$startupPath = Get-StartupShortcutPath
 $thisScript = $MyInvocation.MyCommand.Path
 
 function Get-ActiveWindowPercent {
@@ -74,7 +85,7 @@ function Set-ProviderTrayIcon {
 function Start-ClaudeDesktopUsageUpdate {
     if ($SmokeTest) { return }
     $now = [DateTimeOffset]::Now
-    if (($now - $script:lastClaudeDesktopPoll).TotalMinutes -lt 5) { return }
+    if (($now - $script:lastClaudeDesktopPoll).TotalMinutes -lt $claudeRefreshMinutes) { return }
     $script:lastClaudeDesktopPoll = $now
 
     $helper = Join-Path $PSScriptRoot 'claude-desktop-usage.py'
@@ -101,17 +112,7 @@ function Start-UsageApiServer {
 
 function Set-StartupEnabled {
     param([bool]$Enabled)
-    if ($Enabled) {
-        $shell = New-Object -ComObject WScript.Shell
-        $shortcut = $shell.CreateShortcut($startupPath)
-        $shortcut.TargetPath = (Get-Command powershell.exe).Source
-        $shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $thisScript
-        $shortcut.WorkingDirectory = Split-Path -Parent $thisScript
-        $shortcut.Description = 'LLM Usage Monitor'
-        $shortcut.Save()
-    } elseif (Test-Path -LiteralPath $startupPath) {
-        Remove-Item -LiteralPath $startupPath -Force
-    }
+    Set-MonitorStartupEnabled -Enabled $Enabled -MonitorScript $thisScript
 }
 
 function New-UsageGroup {
@@ -207,6 +208,7 @@ function Check-UsageAlerts {
         }
         if ($band -gt $script:lastAlertBands[$key] -and $band -gt 0) {
             $targetIcon = if ($Usage.Provider -eq 'Codex') { $codexNotifyIcon } else { $claudeNotifyIcon }
+            if (-not $targetIcon.Visible) { $script:lastAlertBands[$key] = $band; continue }
             $targetIcon.BalloonTipTitle = '{0} の利用制限' -f $Usage.Provider
             $targetIcon.BalloonTipText = '{0}枠を {1:0.#}% 使用しています。' -f $pair[0], $window.UsedPercent
             $targetIcon.BalloonTipIcon = if ($band -ge 2) { [System.Windows.Forms.ToolTipIcon]::Error } else { [System.Windows.Forms.ToolTipIcon]::Warning }
@@ -238,7 +240,7 @@ function Update-Snapshot {
 
 $form = New-Object System.Windows.Forms.Form
 $form.Text = 'LLM Usage Monitor'
-$form.ClientSize = New-Object System.Drawing.Size 448, 380
+$form.ClientSize = New-Object System.Drawing.Size 448, 410
 $form.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
 $form.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
 $form.MaximizeBox = $false
@@ -265,10 +267,16 @@ $claudeControls = New-UsageGroup 'Claude Code' 202
 
 $hint = New-Object System.Windows.Forms.Label
 $hint.Text = 'ウィンドウを閉じてもタスクトレイで動作を続けます。'
-$hint.Location = New-Object System.Drawing.Point 14, 360
-$hint.Size = New-Object System.Drawing.Size 420, 18
+$hint.Location = New-Object System.Drawing.Point 14, 373
+$hint.Size = New-Object System.Drawing.Size 315, 22
 $hint.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($hint)
+
+$settingsButton = New-Object System.Windows.Forms.Button
+$settingsButton.Text = '設定...'
+$settingsButton.Location = New-Object System.Drawing.Point 346, 367
+$settingsButton.Size = New-Object System.Drawing.Size 90, 28
+$form.Controls.Add($settingsButton)
 
 $menu = New-Object System.Windows.Forms.ContextMenuStrip
 $codexMenu = $menu.Items.Add('Codex　待機中')
@@ -280,6 +288,7 @@ $detailsMenu = $menu.Items.Add('詳細を表示')
 $refreshMenu = $menu.Items.Add('今すぐ更新')
 $startupMenu = $menu.Items.Add('Windows 起動時に開始')
 $startupMenu.CheckOnClick = $false
+$settingsMenu = $menu.Items.Add('設定...')
 $dataMenu = $menu.Items.Add('データフォルダーを開く')
 $menu.Items.Add((New-Object System.Windows.Forms.ToolStripSeparator)) | Out-Null
 $exitMenu = $menu.Items.Add('終了')
@@ -288,13 +297,13 @@ $codexNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $codexNotifyIcon.ContextMenuStrip = $menu
 $codexNotifyIcon.Icon = New-ProviderUsageIcon 'Codex' $null $null
 $codexNotifyIcon.Text = 'Codex | 外側 5h ? | 内側 7d ?'
-$codexNotifyIcon.Visible = $true
+$codexNotifyIcon.Visible = $showCodexTrayIcon
 
 $claudeNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $claudeNotifyIcon.ContextMenuStrip = $menu
 $claudeNotifyIcon.Icon = New-ProviderUsageIcon 'Claude' $null $null
 $claudeNotifyIcon.Text = 'Claude | 外側 5h ? | 内側 7d ?'
-$claudeNotifyIcon.Visible = $true
+$claudeNotifyIcon.Visible = $showClaudeTrayIcon
 
 $showDetails = {
     Update-Snapshot
@@ -306,6 +315,16 @@ $codexNotifyIcon.Add_MouseClick({ param($sender, $eventArgs); if ($eventArgs.But
 $claudeNotifyIcon.Add_MouseClick({ param($sender, $eventArgs); if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $showDetails } })
 $refreshMenu.Add_Click({ Update-Snapshot })
 $startupMenu.Add_Click({ Set-StartupEnabled (-not (Test-Path -LiteralPath $startupPath)); $startupMenu.Checked = Test-Path -LiteralPath $startupPath })
+$openSettings = {
+    if (Show-MonitorSettingsDialog -MonitorScript $thisScript) {
+        $script:restartRequested = $true
+        $script:allowExit = $true
+        $form.Close()
+        [System.Windows.Forms.Application]::Exit()
+    }
+}
+$settingsMenu.Add_Click($openSettings)
+$settingsButton.Add_Click($openSettings)
 $dataMenu.Add_Click({
     $path = Join-Path $HOME '.ai-usage'
     New-Item -ItemType Directory -Force -Path $path | Out-Null
@@ -316,7 +335,7 @@ $exitMenu.Add_Click({ $script:allowExit = $true; $form.Close(); [System.Windows.
 $form.Add_FormClosing({ param($sender, $eventArgs); if (-not $script:allowExit) { $eventArgs.Cancel = $true; $form.Hide() } })
 
 $timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = [Math]::Max(15, $RefreshSeconds) * 1000
+$timer.Interval = [Math]::Max(5, $RefreshSeconds) * 1000
 $timer.Add_Tick({ Update-Snapshot })
 $timer.Start()
 
@@ -341,4 +360,7 @@ try {
     $form.Dispose()
     if ($createdNew) { $mutex.ReleaseMutex() }
     $mutex.Dispose()
+    if ($script:restartRequested) {
+        Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $thisScript)
+    }
 }

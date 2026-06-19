@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $installDir = Join-Path $env:LOCALAPPDATA 'LLMUsageMonitor'
 $sourceDir = Join-Path $PSScriptRoot 'src'
 $startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\LLM Usage Monitor.lnk'
+$settingsShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LLM Usage Monitor Settings.lnk'
 $statePath = Join-Path $installDir 'install-state.json'
 
 # Stop the previous monitor before replacing its scripts. This is deliberately
@@ -34,6 +35,9 @@ Copy-Item -LiteralPath (Join-Path $sourceDir 'claude-statusline.ps1') -Destinati
 Copy-Item -LiteralPath (Join-Path $sourceDir 'claude-desktop-usage.py') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'TrayIcon.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'usage_api.py') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'Settings.ps1') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'SettingsDialog.ps1') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'LLMUsageSettings.ps1') -Destination $installDir -Force
 
 $state = [ordered]@{ configured_claude = $false; previous_status_line = $null }
 if (Test-Path -LiteralPath $statePath) {
@@ -78,6 +82,14 @@ if (-not $NoStartup) {
     $shortcut.Description = 'LLM Usage Monitor'
     $shortcut.Save()
 }
+
+$shell = New-Object -ComObject WScript.Shell
+$settingsShortcut = $shell.CreateShortcut($settingsShortcutPath)
+$settingsShortcut.TargetPath = (Get-Command powershell.exe).Source
+$settingsShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageSettings.ps1')
+$settingsShortcut.WorkingDirectory = $installDir
+$settingsShortcut.Description = 'Configure LLM Usage Monitor'
+$settingsShortcut.Save()
 
 if (-not $NoLaunch) {
     $arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageMonitor.ps1')

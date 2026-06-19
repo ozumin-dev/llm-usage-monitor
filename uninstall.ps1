@@ -5,8 +5,20 @@ $ErrorActionPreference = 'Stop'
 $installDir = Join-Path $env:LOCALAPPDATA 'LLMUsageMonitor'
 $statePath = Join-Path $installDir 'install-state.json'
 $startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\LLM Usage Monitor.lnk'
+$settingsShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LLM Usage Monitor Settings.lnk'
 
 if (Test-Path -LiteralPath $startupPath) { Remove-Item -LiteralPath $startupPath -Force }
+if (Test-Path -LiteralPath $settingsShortcutPath) { Remove-Item -LiteralPath $settingsShortcutPath -Force }
+
+Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.CommandLine -notmatch '(?i)\s-(Command|EncodedCommand)\s' -and
+        $_.CommandLine -match '(?i)-File\s+"?[^"\r\n]*\\LLMUsageMonitor\\LLMUsageMonitor\.ps1'
+    } |
+    ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object { $_.Name -in @('python.exe', 'pythonw.exe') -and $_.CommandLine -match '(?i)LLMUsageMonitor[\\/]usage_api\.py' } |
+    ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
 
 if (-not $KeepClaudeConfiguration -and (Test-Path -LiteralPath $statePath)) {
     try {
