@@ -38,6 +38,8 @@ Copy-Item -LiteralPath (Join-Path $sourceDir 'usage_api.py') -Destination $insta
 Copy-Item -LiteralPath (Join-Path $sourceDir 'Settings.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'SettingsDialog.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'LLMUsageSettings.ps1') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'CustomTrayIcon.example.ps1') -Destination $installDir -Force
+New-Item -ItemType Directory -Force -Path (Join-Path $installDir 'icons') | Out-Null
 
 $state = [ordered]@{ configured_claude = $false; previous_status_line = $null }
 if (Test-Path -LiteralPath $statePath) {

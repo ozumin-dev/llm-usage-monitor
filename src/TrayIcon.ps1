@@ -142,3 +142,32 @@ function New-ProviderUsageIcon {
         $bitmap.Dispose()
     }
 }
+
+function New-MonitorTrayIcon {
+    [CmdletBinding()]
+    param(
+        [string]$Provider,
+        [Nullable[double]]$FiveHourUsed,
+        [Nullable[double]]$WeeklyUsed,
+        [Nullable[double]]$FiveHourResetRemainingPercent = $null
+    )
+
+    $customRenderer = Get-Command -Name 'New-CustomProviderUsageIcon' -CommandType Function -ErrorAction SilentlyContinue
+    if ($null -ne $customRenderer) {
+        try {
+            $customIcon = New-CustomProviderUsageIcon `
+                -Provider $Provider `
+                -FiveHourUsed $FiveHourUsed `
+                -WeeklyUsed $WeeklyUsed `
+                -FiveHourResetRemainingPercent $FiveHourResetRemainingPercent
+            if ($customIcon -is [System.Drawing.Icon]) { return $customIcon }
+            if ($null -ne $customIcon) {
+                Write-Warning 'New-CustomProviderUsageIcon must return System.Drawing.Icon or $null. Using the default renderer.'
+            }
+        } catch {
+            Write-Warning ('Custom tray icon renderer failed: {0}. Using the default renderer.' -f $_.Exception.Message)
+        }
+    }
+
+    return New-ProviderUsageIcon $Provider $FiveHourUsed $WeeklyUsed $FiveHourResetRemainingPercent
+}

@@ -14,6 +14,10 @@ Add-Type -AssemblyName System.Drawing
 . (Join-Path $PSScriptRoot 'Settings.ps1')
 . (Join-Path $PSScriptRoot 'SettingsDialog.ps1')
 . (Join-Path $PSScriptRoot 'TrayIcon.ps1')
+$customTrayIconScript = Join-Path $PSScriptRoot 'CustomTrayIcon.ps1'
+if (Test-Path -LiteralPath $customTrayIconScript) {
+    try { . $customTrayIconScript } catch { Write-Warning ('CustomTrayIcon.ps1 could not be loaded: {0}' -f $_.Exception.Message) }
+}
 [System.Windows.Forms.Application]::EnableVisualStyles()
 
 $monitorSettings = Get-MonitorSettings
@@ -78,7 +82,7 @@ function Set-ProviderTrayIcon {
     $signature = '{0}:{1}:{2}:{3}' -f $Provider, $(if ($null -eq $five) { '?' } else { [Math]::Round($five) }), $(if ($null -eq $week) { '?' } else { [Math]::Round($week) }), $(if ($null -eq $resetBucket) { '?' } else { $resetBucket })
     if ($script:iconSignatures[$Provider] -ne $signature) {
         $oldIcon = $TrayIcon.Icon
-        $TrayIcon.Icon = New-ProviderUsageIcon $Provider $five $week $resetBucket
+        $TrayIcon.Icon = New-MonitorTrayIcon $Provider $five $week $resetBucket
         $script:iconSignatures[$Provider] = $signature
         if ($null -ne $oldIcon) { $oldIcon.Dispose() }
     }
@@ -312,13 +316,13 @@ $exitMenu = $menu.Items.Add('終了')
 
 $codexNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $codexNotifyIcon.ContextMenuStrip = $menu
-$codexNotifyIcon.Icon = New-ProviderUsageIcon 'Codex' $null $null
+$codexNotifyIcon.Icon = New-MonitorTrayIcon 'Codex' $null $null
 $codexNotifyIcon.Text = 'Codex | 外側 5h ? | 内側 7d ?'
 $codexNotifyIcon.Visible = $showCodexTrayIcon
 
 $claudeNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $claudeNotifyIcon.ContextMenuStrip = $menu
-$claudeNotifyIcon.Icon = New-ProviderUsageIcon 'Claude' $null $null
+$claudeNotifyIcon.Icon = New-MonitorTrayIcon 'Claude' $null $null
 $claudeNotifyIcon.Text = 'Claude | 外側 5h ? | 内側 7d ?'
 $claudeNotifyIcon.Visible = $showClaudeTrayIcon
 
