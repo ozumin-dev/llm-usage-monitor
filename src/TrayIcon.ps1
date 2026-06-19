@@ -59,15 +59,17 @@ function New-ProviderUsageBitmap {
         [System.Drawing.ColorTranslator]::FromHtml('#4A2E27')
     }
 
-    $outerRect = New-Object System.Drawing.RectangleF (3 * $scale), (3 * $scale), (26 * $scale), (26 * $scale)
-    $trackPen = New-Object System.Drawing.Pen $track, (5.2 * $scale)
+    # Keep the usage ring inside the countdown markers so both remain legible
+    # after Windows scales the tray icon down to 16 px.
+    $outerRect = New-Object System.Drawing.RectangleF (6 * $scale), (6 * $scale), (20 * $scale), (20 * $scale)
+    $trackPen = New-Object System.Drawing.Pen $track, (4.6 * $scale)
     $trackPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
     $trackPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
     $graphics.DrawEllipse($trackPen, $outerRect)
 
     if ($null -ne $FiveHourUsed) {
         $five = [Math]::Max(0, [Math]::Min(100, [double]$FiveHourUsed))
-        $fivePen = New-Object System.Drawing.Pen (Get-UsageChartColor $Provider $five), (5.2 * $scale)
+        $fivePen = New-Object System.Drawing.Pen (Get-UsageChartColor $Provider $five), (4.6 * $scale)
         $fivePen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
         $fivePen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
         if ($five -ge 99.95) {
@@ -78,23 +80,23 @@ function New-ProviderUsageBitmap {
         $fivePen.Dispose()
     }
 
-    $identityRect = New-Object System.Drawing.RectangleF (0.9 * $scale), (0.9 * $scale), (30.2 * $scale), (30.2 * $scale)
-    $countdownTrackPen = New-Object System.Drawing.Pen $track, (2.0 * $scale)
+    $identityRect = New-Object System.Drawing.RectangleF (1.8 * $scale), (1.8 * $scale), (28.4 * $scale), (28.4 * $scale)
+    $countdownTrackPen = New-Object System.Drawing.Pen $base, (2.4 * $scale)
     $graphics.DrawEllipse($countdownTrackPen, $identityRect)
     $remaining = [Math]::Max(0, [Math]::Min(100, $UpdateRemainingPercent))
-    if ($remaining -gt 0) {
-        $countdownPen = New-Object System.Drawing.Pen $base, (2.0 * $scale)
+    $activeSegments = [Math]::Min(4, [Math]::Ceiling($remaining / 25))
+    if ($activeSegments -gt 0) {
+        $countdownColor = [System.Drawing.ColorTranslator]::FromHtml('#F8FAFC')
+        $countdownPen = New-Object System.Drawing.Pen $countdownColor, (3.2 * $scale)
         $countdownPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
         $countdownPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
-        if ($remaining -ge 99.95) {
-            $graphics.DrawEllipse($countdownPen, $identityRect)
-        } else {
-            $graphics.DrawArc($countdownPen, $identityRect, -90, [single](3.6 * $remaining))
+        for ($segment = 0; $segment -lt $activeSegments; $segment++) {
+            $graphics.DrawArc($countdownPen, $identityRect, [single](-85 + (90 * $segment)), 70)
         }
         $countdownPen.Dispose()
     }
 
-    $innerRect = New-Object System.Drawing.RectangleF (9 * $scale), (9 * $scale), (14 * $scale), (14 * $scale)
+    $innerRect = New-Object System.Drawing.RectangleF (10 * $scale), (10 * $scale), (12 * $scale), (12 * $scale)
     $innerTrackBrush = New-Object System.Drawing.SolidBrush $track
     $graphics.FillEllipse($innerTrackBrush, $innerRect)
     if ($null -ne $WeeklyUsed) {

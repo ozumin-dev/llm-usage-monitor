@@ -81,7 +81,7 @@ function Set-ProviderTrayIcon {
     )
     $five = if ($null -ne $Usage) { Get-ActiveWindowPercent $Usage.FiveHour } else { $null }
     $week = if ($null -ne $Usage) { Get-ActiveWindowPercent $Usage.Weekly } else { $null }
-    $countdownBucket = [Math]::Max(0, [Math]::Min(100, [Math]::Ceiling($UpdateRemainingPercent / 5) * 5))
+    $countdownBucket = [Math]::Max(0, [Math]::Min(100, [Math]::Ceiling($UpdateRemainingPercent / 25) * 25))
     $signature = '{0}:{1}:{2}:{3}' -f $Provider, $(if ($null -eq $five) { '?' } else { [Math]::Round($five) }), $(if ($null -eq $week) { '?' } else { [Math]::Round($week) }), $countdownBucket
     if ($script:iconSignatures[$Provider] -ne $signature) {
         $oldIcon = $TrayIcon.Icon
