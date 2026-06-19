@@ -13,7 +13,8 @@ try {
     foreach ($name in @('codex', 'claude')) {
         $bitmap = New-Object System.Drawing.Bitmap 32, 32
         $graphics = [System.Drawing.Graphics]::FromImage($bitmap)
-        $graphics.Clear([System.Drawing.Color]::Lime)
+        # Solid red is intentionally unmistakable when this test is run manually.
+        $graphics.Clear([System.Drawing.Color]::Red)
         $handle = $bitmap.GetHicon()
         $icon = [System.Drawing.Icon]::FromHandle($handle).Clone()
         $stream = [System.IO.File]::Create((Join-Path $iconsDirectory ($name + '.ico')))
@@ -36,7 +37,7 @@ try {
             $rendered = $result.ToBitmap()
             try {
                 $pixel = $rendered.GetPixel(16, 16)
-                if ($pixel.R -ne 0 -or $pixel.G -ne 255 -or $pixel.B -ne 0) {
+                if ($pixel.R -ne 255 -or $pixel.G -ne 0 -or $pixel.B -ne 0) {
                     throw "$provider custom ICO was not loaded"
                 }
             } finally {
