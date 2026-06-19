@@ -39,6 +39,8 @@ $script:lastClaudeDesktopPoll = [DateTimeOffset]::MinValue
 $script:claudeUpdateProcess = $null
 $script:apiProcess = $null
 $script:restartRequested = $false
+$script:nextLocalRefreshAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
+$script:nextClaudeRefreshAt = [DateTimeOffset]::Now.AddSeconds($claudeRefreshSeconds)
 $startupPath = Get-StartupShortcutPath
 $thisScript = $MyInvocation.MyCommand.Path
 
@@ -58,6 +60,11 @@ function Format-ResetRemainingShort {
     return ('{0}d~' -f [Math]::Floor($seconds / 86400))
 }
 
+function Get-NextUpdateSeconds {
+    param([DateTimeOffset]$NextAt)
+    return [Math]::Max(0, [Math]::Ceiling(($NextAt - [DateTimeOffset]::Now).TotalSeconds))
+}
+
 function Set-ProviderTrayIcon {
     param(
         [ValidateSet('Codex', 'Claude')][string]$Provider,
@@ -73,14 +80,23 @@ function Set-ProviderTrayIcon {
         $script:iconSignatures[$Provider] = $signature
         if ($null -ne $oldIcon) { $oldIcon.Dispose() }
     }
-    $label = if ($Provider -eq 'Claude') { 'Claude' } else { 'Codex' }
-    $fiveText = if ($null -eq $five) { '?' } else { '{0:0.#}%' -f $five }
-    $weekText = if ($null -eq $week) { '?' } else { '{0:0.#}%' -f $week }
-    $fiveReset = if ($null -ne $Usage) { Format-ResetRemainingShort $Usage.FiveHour } else { '?' }
-    $weekReset = if ($null -ne $Usage) { Format-ResetRemainingShort $Usage.Weekly } else { '?' }
-    $tooltip = '{0} | 5h {1}→{2} | 7d {3}→{4}' -f $label, $fiveText, $fiveReset, $weekText, $weekReset
-    if ($tooltip.Length -gt 63) { $tooltip = $tooltip.Substring(0, 63) }
-    $TrayIcon.Text = $tooltip
+}
+
+function Update-CountdownDisplay {
+    $codexSeconds = Get-NextUpdateSeconds $script:nextLocalRefreshAt
+    $claudeSeconds = Get-NextUpdateSeconds $script:nextClaudeRefreshAt
+    $codexSummary = Get-ProviderSummary $script:snapshot.Codex
+    $claudeSummary = Get-ProviderSummary $script:snapshot.Claude
+
+    $codexTooltip = 'Codex | {0} | 次回 {1}s' -f $codexSummary, $codexSeconds
+    $claudeTooltip = 'Claude | {0} | 次回 {1}s' -f $claudeSummary, $claudeSeconds
+    if ($codexTooltip.Length -gt 63) { $codexTooltip = $codexTooltip.Substring(0, 63) }
+    if ($claudeTooltip.Length -gt 63) { $claudeTooltip = $claudeTooltip.Substring(0, 63) }
+    $codexNotifyIcon.Text = $codexTooltip
+    $claudeNotifyIcon.Text = $claudeTooltip
+    $codexMenu.Text = 'Codex　{0} | 次回 {1}s' -f $codexSummary, $codexSeconds
+    $claudeMenu.Text = 'Claude　{0} | 次回 {1}s' -f $claudeSummary, $claudeSeconds
+    $updatedLabel.Text = '次回 Codex {0}s / Claude {1}s' -f $codexSeconds, $claudeSeconds
 }
 
 function Start-ClaudeDesktopUsageUpdate {
@@ -226,12 +242,9 @@ function Update-Snapshot {
         Save-UsageSnapshot $script:snapshot
         Update-ProviderControls $codexControls $script:snapshot.Codex
         Update-ProviderControls $claudeControls $script:snapshot.Claude
-        $updatedLabel.Text = '最終確認: {0}' -f (Get-Date -Format 'H:mm:ss')
-
         Set-ProviderTrayIcon 'Codex' $script:snapshot.Codex $codexNotifyIcon
         Set-ProviderTrayIcon 'Claude' $script:snapshot.Claude $claudeNotifyIcon
-        $codexMenu.Text = 'Codex　' + (Get-ProviderSummary $script:snapshot.Codex)
-        $claudeMenu.Text = 'Claude　' + (Get-ProviderSummary $script:snapshot.Claude)
+        Update-CountdownDisplay
         Check-UsageAlerts $script:snapshot.Codex
         Check-UsageAlerts $script:snapshot.Claude
     } catch {
@@ -253,13 +266,13 @@ $heading = New-Object System.Windows.Forms.Label
 $heading.Text = 'LLM 利用状況'
 $heading.Font = New-Object System.Drawing.Font 'Segoe UI', 14, ([System.Drawing.FontStyle]::Bold)
 $heading.Location = New-Object System.Drawing.Point 12, 10
-$heading.Size = New-Object System.Drawing.Size 250, 28
+$heading.Size = New-Object System.Drawing.Size 170, 28
 $form.Controls.Add($heading)
 
 $updatedLabel = New-Object System.Windows.Forms.Label
 $updatedLabel.TextAlign = [System.Drawing.ContentAlignment]::MiddleRight
-$updatedLabel.Location = New-Object System.Drawing.Point 265, 13
-$updatedLabel.Size = New-Object System.Drawing.Size 170, 20
+$updatedLabel.Location = New-Object System.Drawing.Point 175, 13
+$updatedLabel.Size = New-Object System.Drawing.Size 260, 20
 $updatedLabel.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($updatedLabel)
 
@@ -337,13 +350,24 @@ $form.Add_FormClosing({ param($sender, $eventArgs); if (-not $script:allowExit) 
 
 $timer = New-Object System.Windows.Forms.Timer
 $timer.Interval = [Math]::Max(5, $RefreshSeconds) * 1000
-$timer.Add_Tick({ Update-Snapshot })
+$timer.Add_Tick({
+    $script:nextLocalRefreshAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
+    Update-Snapshot
+})
 $timer.Start()
 
 $claudeTimer = New-Object System.Windows.Forms.Timer
 $claudeTimer.Interval = [Math]::Max(5, $claudeRefreshSeconds) * 1000
-$claudeTimer.Add_Tick({ Start-ClaudeDesktopUsageUpdate })
+$claudeTimer.Add_Tick({
+    $script:nextClaudeRefreshAt = [DateTimeOffset]::Now.AddSeconds($claudeRefreshSeconds)
+    Start-ClaudeDesktopUsageUpdate
+})
 $claudeTimer.Start()
+
+$countdownTimer = New-Object System.Windows.Forms.Timer
+$countdownTimer.Interval = 1000
+$countdownTimer.Add_Tick({ Update-CountdownDisplay })
+$countdownTimer.Start()
 
 try {
     Start-UsageApiServer
@@ -357,6 +381,7 @@ try {
 } finally {
     $timer.Stop(); $timer.Dispose()
     $claudeTimer.Stop(); $claudeTimer.Dispose()
+    $countdownTimer.Stop(); $countdownTimer.Dispose()
     if ($null -ne $script:apiProcess -and -not $script:apiProcess.HasExited) {
         Stop-Process -Id $script:apiProcess.Id -Force -ErrorAction SilentlyContinue
     }
