@@ -20,12 +20,20 @@ Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction Silen
     } |
     ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
 
+Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+    Where-Object {
+        $_.Name -in @('python.exe', 'pythonw.exe') -and
+        $_.CommandLine -match '(?i)LLMUsageMonitor[\\/]usage_api\.py'
+    } |
+    ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
+
 New-Item -ItemType Directory -Force -Path $installDir | Out-Null
 Copy-Item -LiteralPath (Join-Path $sourceDir 'UsageData.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'LLMUsageMonitor.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'claude-statusline.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'claude-desktop-usage.py') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'TrayIcon.ps1') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'usage_api.py') -Destination $installDir -Force
 
 $state = [ordered]@{ configured_claude = $false; previous_status_line = $null }
 if (Test-Path -LiteralPath $statePath) {

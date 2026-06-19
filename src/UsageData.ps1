@@ -139,6 +139,68 @@ function Get-UsageSnapshot {
     }
 }
 
+function ConvertTo-ApiUsageWindow {
+    param($Window, [DateTimeOffset]$Now = [DateTimeOffset]::Now)
+    if ($null -eq $Window) { return $null }
+
+    $resetIso = $null
+    if ($null -ne $Window.ResetsAtEpoch) {
+        $resetIso = [DateTimeOffset]::FromUnixTimeSeconds([int64]$Window.ResetsAtEpoch).ToLocalTime().ToString('o')
+    }
+    return [ordered]@{
+        used_percent = [Math]::Round([double]$Window.UsedPercent, 2)
+        left_percent = [Math]::Round([double]$Window.LeftPercent, 2)
+        resets_at_epoch = $Window.ResetsAtEpoch
+        resets_at = $resetIso
+        expired = Test-UsageWindowExpired $Window $Now
+    }
+}
+
+function ConvertTo-ApiProviderUsage {
+    param($Usage, [DateTimeOffset]$Now = [DateTimeOffset]::Now)
+    if ($null -eq $Usage) {
+        return [ordered]@{ available = $false }
+    }
+    return [ordered]@{
+        available = $true
+        model = $Usage.Model
+        plan = $Usage.Plan
+        five_hour = ConvertTo-ApiUsageWindow $Usage.FiveHour $Now
+        weekly = ConvertTo-ApiUsageWindow $Usage.Weekly $Now
+        context_window = if ($null -ne $Usage.ContextUsedPercent) {
+            [ordered]@{ used_percent = [Math]::Round([double]$Usage.ContextUsedPercent, 2) }
+        } else { $null }
+        source = $Usage.Source
+        captured_at = $Usage.CapturedAt.ToString('o')
+    }
+}
+
+function Save-UsageSnapshot {
+    [CmdletBinding()]
+    param(
+        $Snapshot,
+        [string]$Path = (Join-Path $HOME '.ai-usage\usage.json')
+    )
+    if ($null -eq $Snapshot) { return }
+
+    $now = [DateTimeOffset]::Now
+    $result = [ordered]@{
+        schema_version = 1
+        observed_at = $now.ToString('o')
+        providers = [ordered]@{
+            codex = ConvertTo-ApiProviderUsage $Snapshot.Codex $now
+            claude = ConvertTo-ApiProviderUsage $Snapshot.Claude $now
+        }
+    }
+
+    $directory = Split-Path -Parent $Path
+    New-Item -ItemType Directory -Force -Path $directory | Out-Null
+    $temporary = Join-Path $directory ('.usage.{0}.tmp' -f $PID)
+    $json = $result | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($temporary, $json, (New-Object System.Text.UTF8Encoding($false)))
+    Move-Item -LiteralPath $temporary -Destination $Path -Force
+}
+
 function Test-UsageWindowExpired {
     param($Window, [DateTimeOffset]$Now = [DateTimeOffset]::Now)
     if ($null -eq $Window -or $null -eq $Window.ResetsAtEpoch) { return $false }

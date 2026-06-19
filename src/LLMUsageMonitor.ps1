@@ -1,6 +1,8 @@
 ﻿[CmdletBinding()]
 param(
     [int]$RefreshSeconds = 30,
+    [int]$ApiPort = 47831,
+    [switch]$DisableApi,
     [switch]$SmokeTest
 )
 
@@ -24,6 +26,7 @@ $script:iconSignatures = @{}
 $script:allowExit = $false
 $script:lastAlertBands = @{}
 $script:lastClaudeDesktopPoll = [DateTimeOffset]::MinValue
+$script:apiProcess = $null
 $startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\LLM Usage Monitor.lnk'
 $thisScript = $MyInvocation.MyCommand.Path
 
@@ -68,6 +71,18 @@ function Start-ClaudeDesktopUsageUpdate {
 
     $arguments = '"{0}"' -f $helper
     Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden | Out-Null
+}
+
+function Start-UsageApiServer {
+    if ($SmokeTest -or $DisableApi) { return }
+    $serverScript = Join-Path $PSScriptRoot 'usage_api.py'
+    if (-not (Test-Path -LiteralPath $serverScript)) { return }
+    $python = Get-Command pythonw.exe -ErrorAction SilentlyContinue
+    if ($null -eq $python) { $python = Get-Command python.exe -ErrorAction SilentlyContinue }
+    if ($null -eq $python) { return }
+
+    $arguments = '"{0}" --host 127.0.0.1 --port {1}' -f $serverScript, $ApiPort
+    $script:apiProcess = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
 }
 
 function Set-StartupEnabled {
@@ -187,6 +202,7 @@ function Update-Snapshot {
     try {
         Start-ClaudeDesktopUsageUpdate
         $script:snapshot = Get-UsageSnapshot
+        Save-UsageSnapshot $script:snapshot
         Update-ProviderControls $codexControls $script:snapshot.Codex
         Update-ProviderControls $claudeControls $script:snapshot.Claude
         $updatedLabel.Text = '最終確認: {0}' -f (Get-Date -Format 'H:mm:ss')
@@ -287,6 +303,7 @@ $timer.Add_Tick({ Update-Snapshot })
 $timer.Start()
 
 try {
+    Start-UsageApiServer
     Update-Snapshot
     if ($SmokeTest) {
         Write-Host 'LLM Usage Monitor smoke test passed.'
@@ -295,6 +312,9 @@ try {
     }
 } finally {
     $timer.Stop(); $timer.Dispose()
+    if ($null -ne $script:apiProcess -and -not $script:apiProcess.HasExited) {
+        Stop-Process -Id $script:apiProcess.Id -Force -ErrorAction SilentlyContinue
+    }
     foreach ($trayIcon in @($codexNotifyIcon, $claudeNotifyIcon)) {
         $trayIcon.Visible = $false
         if ($null -ne $trayIcon.Icon) { $trayIcon.Icon.Dispose() }

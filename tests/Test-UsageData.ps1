@@ -26,4 +26,17 @@ Assert-Equal 71 $claude.ContextUsedPercent 'Claude context percent'
 $missing = Get-ClaudeUsage -Path (Join-Path $fixtureDir 'missing.json')
 Assert-Equal $null $missing 'Missing Claude data'
 
+$snapshotPath = Join-Path $env:TEMP ('llm-usage-test-{0}.json' -f $PID)
+try {
+    $snapshot = [pscustomobject]@{ Codex = $codex; Claude = $claude; ReadAt = [DateTimeOffset]::Now }
+    Save-UsageSnapshot -Snapshot $snapshot -Path $snapshotPath
+    $apiData = Get-Content -Raw -LiteralPath $snapshotPath | ConvertFrom-Json
+    Assert-Equal 1 $apiData.schema_version 'API schema version'
+    Assert-Equal $true $apiData.providers.codex.available 'API Codex availability'
+    Assert-Equal 22 $apiData.providers.codex.five_hour.used_percent 'API Codex 5h percent'
+    Assert-Equal 93 $apiData.providers.claude.weekly.used_percent 'API Claude weekly percent'
+} finally {
+    if (Test-Path -LiteralPath $snapshotPath) { Remove-Item -LiteralPath $snapshotPath -Force }
+}
+
 Write-Host 'All UsageData tests passed.' -ForegroundColor Green
