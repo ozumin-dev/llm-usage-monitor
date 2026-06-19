@@ -42,6 +42,7 @@ function New-ProviderUsageBitmap {
         [ValidateSet('Codex', 'Claude')][string]$Provider,
         [Nullable[double]]$FiveHourUsed,
         [Nullable[double]]$WeeklyUsed,
+        [double]$UpdateRemainingPercent = 100,
         [int]$Size = 32
     )
 
@@ -77,9 +78,21 @@ function New-ProviderUsageBitmap {
         $fivePen.Dispose()
     }
 
-    $identityPen = New-Object System.Drawing.Pen $base, (1.15 * $scale)
     $identityRect = New-Object System.Drawing.RectangleF (0.9 * $scale), (0.9 * $scale), (30.2 * $scale), (30.2 * $scale)
-    $graphics.DrawEllipse($identityPen, $identityRect)
+    $countdownTrackPen = New-Object System.Drawing.Pen $track, (2.0 * $scale)
+    $graphics.DrawEllipse($countdownTrackPen, $identityRect)
+    $remaining = [Math]::Max(0, [Math]::Min(100, $UpdateRemainingPercent))
+    if ($remaining -gt 0) {
+        $countdownPen = New-Object System.Drawing.Pen $base, (2.0 * $scale)
+        $countdownPen.StartCap = [System.Drawing.Drawing2D.LineCap]::Round
+        $countdownPen.EndCap = [System.Drawing.Drawing2D.LineCap]::Round
+        if ($remaining -ge 99.95) {
+            $graphics.DrawEllipse($countdownPen, $identityRect)
+        } else {
+            $graphics.DrawArc($countdownPen, $identityRect, -90, [single](3.6 * $remaining))
+        }
+        $countdownPen.Dispose()
+    }
 
     $innerRect = New-Object System.Drawing.RectangleF (9 * $scale), (9 * $scale), (14 * $scale), (14 * $scale)
     $innerTrackBrush = New-Object System.Drawing.SolidBrush $track
@@ -97,7 +110,7 @@ function New-ProviderUsageBitmap {
     $innerPen = New-Object System.Drawing.Pen $base, (1.4 * $scale)
     $graphics.DrawEllipse($innerPen, $innerRect)
 
-    $innerPen.Dispose(); $innerTrackBrush.Dispose(); $identityPen.Dispose(); $trackPen.Dispose(); $graphics.Dispose()
+    $innerPen.Dispose(); $innerTrackBrush.Dispose(); $countdownTrackPen.Dispose(); $trackPen.Dispose(); $graphics.Dispose()
     return $bitmap
 }
 
@@ -105,9 +118,10 @@ function New-ProviderUsageIcon {
     param(
         [ValidateSet('Codex', 'Claude')][string]$Provider,
         [Nullable[double]]$FiveHourUsed,
-        [Nullable[double]]$WeeklyUsed
+        [Nullable[double]]$WeeklyUsed,
+        [double]$UpdateRemainingPercent = 100
     )
-    $bitmap = New-ProviderUsageBitmap $Provider $FiveHourUsed $WeeklyUsed 32
+    $bitmap = New-ProviderUsageBitmap $Provider $FiveHourUsed $WeeklyUsed $UpdateRemainingPercent 32
     $handle = $bitmap.GetHicon()
     try {
         return [System.Drawing.Icon]::FromHandle($handle).Clone()

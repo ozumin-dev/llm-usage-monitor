@@ -65,18 +65,27 @@ function Get-NextUpdateSeconds {
     return [Math]::Max(0, [Math]::Ceiling(($NextAt - [DateTimeOffset]::Now).TotalSeconds))
 }
 
+function Get-UpdateRemainingPercent {
+    param([DateTimeOffset]$NextAt, [double]$IntervalSeconds)
+    if ($IntervalSeconds -le 0) { return 0 }
+    $remaining = ($NextAt - [DateTimeOffset]::Now).TotalSeconds
+    return [Math]::Max(0, [Math]::Min(100, ($remaining / $IntervalSeconds) * 100))
+}
+
 function Set-ProviderTrayIcon {
     param(
         [ValidateSet('Codex', 'Claude')][string]$Provider,
         $Usage,
-        [System.Windows.Forms.NotifyIcon]$TrayIcon
+        [System.Windows.Forms.NotifyIcon]$TrayIcon,
+        [double]$UpdateRemainingPercent = 100
     )
     $five = if ($null -ne $Usage) { Get-ActiveWindowPercent $Usage.FiveHour } else { $null }
     $week = if ($null -ne $Usage) { Get-ActiveWindowPercent $Usage.Weekly } else { $null }
-    $signature = '{0}:{1}:{2}' -f $Provider, $(if ($null -eq $five) { '?' } else { [Math]::Round($five) }), $(if ($null -eq $week) { '?' } else { [Math]::Round($week) })
+    $countdownBucket = [Math]::Max(0, [Math]::Min(100, [Math]::Ceiling($UpdateRemainingPercent / 5) * 5))
+    $signature = '{0}:{1}:{2}:{3}' -f $Provider, $(if ($null -eq $five) { '?' } else { [Math]::Round($five) }), $(if ($null -eq $week) { '?' } else { [Math]::Round($week) }), $countdownBucket
     if ($script:iconSignatures[$Provider] -ne $signature) {
         $oldIcon = $TrayIcon.Icon
-        $TrayIcon.Icon = New-ProviderUsageIcon $Provider $five $week
+        $TrayIcon.Icon = New-ProviderUsageIcon $Provider $five $week $countdownBucket
         $script:iconSignatures[$Provider] = $signature
         if ($null -ne $oldIcon) { $oldIcon.Dispose() }
     }
@@ -85,8 +94,13 @@ function Set-ProviderTrayIcon {
 function Update-CountdownDisplay {
     $codexSeconds = Get-NextUpdateSeconds $script:nextLocalRefreshAt
     $claudeSeconds = Get-NextUpdateSeconds $script:nextClaudeRefreshAt
+    $codexRemaining = Get-UpdateRemainingPercent $script:nextLocalRefreshAt $RefreshSeconds
+    $claudeRemaining = Get-UpdateRemainingPercent $script:nextClaudeRefreshAt $claudeRefreshSeconds
     $codexSummary = Get-ProviderSummary $script:snapshot.Codex
     $claudeSummary = Get-ProviderSummary $script:snapshot.Claude
+
+    if ($codexNotifyIcon.Visible) { Set-ProviderTrayIcon 'Codex' $script:snapshot.Codex $codexNotifyIcon $codexRemaining }
+    if ($claudeNotifyIcon.Visible) { Set-ProviderTrayIcon 'Claude' $script:snapshot.Claude $claudeNotifyIcon $claudeRemaining }
 
     $codexTooltip = 'Codex | {0} | 次回 {1}s' -f $codexSummary, $codexSeconds
     $claudeTooltip = 'Claude | {0} | 次回 {1}s' -f $claudeSummary, $claudeSeconds
@@ -242,8 +256,6 @@ function Update-Snapshot {
         Save-UsageSnapshot $script:snapshot
         Update-ProviderControls $codexControls $script:snapshot.Codex
         Update-ProviderControls $claudeControls $script:snapshot.Claude
-        Set-ProviderTrayIcon 'Codex' $script:snapshot.Codex $codexNotifyIcon
-        Set-ProviderTrayIcon 'Claude' $script:snapshot.Claude $claudeNotifyIcon
         Update-CountdownDisplay
         Check-UsageAlerts $script:snapshot.Codex
         Check-UsageAlerts $script:snapshot.Claude
