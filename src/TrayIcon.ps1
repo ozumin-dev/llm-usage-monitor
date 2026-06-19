@@ -27,13 +27,13 @@ function Get-UsageChartColor {
     if ($null -eq $UsedPercent) { return [System.Drawing.Color]::FromArgb(135, 145, 155) }
 
     if ($Provider -eq 'Codex') {
-        if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#8B5CF6') }
+        if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#4B5563') }
         if ($UsedPercent -ge 90) { return [System.Drawing.ColorTranslator]::FromHtml('#F04444') }
         if ($UsedPercent -ge 70) { return [System.Drawing.ColorTranslator]::FromHtml('#FFB000') }
         return [System.Drawing.ColorTranslator]::FromHtml('#32C7F0')
     }
 
-    if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#2563EB') }
+    if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#4B5563') }
     if ($UsedPercent -ge 90) { return [System.Drawing.ColorTranslator]::FromHtml('#C026D3') }
     if ($UsedPercent -ge 70) { return [System.Drawing.ColorTranslator]::FromHtml('#FF7A00') }
     return [System.Drawing.ColorTranslator]::FromHtml('#D97757')

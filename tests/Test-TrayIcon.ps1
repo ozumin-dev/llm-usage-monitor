@@ -11,8 +11,8 @@ function Assert-Color([string]$ExpectedHtml, $Actual, [string]$Message) {
 }
 
 Assert-Color '#F04444' (Get-UsageChartColor 'Codex' 99) 'Codex danger color'
-Assert-Color '#8B5CF6' (Get-UsageChartColor 'Codex' 100) 'Codex limit color'
+Assert-Color '#4B5563' (Get-UsageChartColor 'Codex' 100) 'Codex limit color'
 Assert-Color '#C026D3' (Get-UsageChartColor 'Claude' 99) 'Claude danger color'
-Assert-Color '#2563EB' (Get-UsageChartColor 'Claude' 100) 'Claude limit color'
+Assert-Color '#4B5563' (Get-UsageChartColor 'Claude' 100) 'Claude limit color'
 
 Write-Host 'All TrayIcon tests passed.' -ForegroundColor Green
