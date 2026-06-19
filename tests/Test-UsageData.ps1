@@ -1,0 +1,29 @@
+﻿$ErrorActionPreference = 'Stop'
+$root = Split-Path -Parent $PSScriptRoot
+. (Join-Path $root 'src\UsageData.ps1')
+
+function Assert-Equal($Expected, $Actual, [string]$Message) {
+    if ($Expected -ne $Actual) {
+        throw "$Message (expected=$Expected, actual=$Actual)"
+    }
+}
+
+$fixtureDir = Join-Path $PSScriptRoot 'fixtures'
+$codex = Get-CodexUsage -SearchRoots @($fixtureDir) -FilesToInspect 5 -TailLines 50
+Assert-Equal 'Codex' $codex.Provider 'Codex provider'
+Assert-Equal 22 $codex.FiveHour.UsedPercent 'Codex 5h used percent'
+Assert-Equal 78 $codex.FiveHour.LeftPercent 'Codex 5h left percent'
+Assert-Equal 39 $codex.Weekly.UsedPercent 'Codex weekly used percent'
+Assert-Equal 'plus' $codex.Plan 'Codex plan'
+
+$claude = Get-ClaudeUsage -Path (Join-Path $fixtureDir 'claude-code-usage.json')
+Assert-Equal 'Claude Code' $claude.Provider 'Claude provider'
+Assert-Equal 'Opus Test' $claude.Model 'Claude model'
+Assert-Equal 20 $claude.FiveHour.UsedPercent 'Claude 5h used percent'
+Assert-Equal 93 $claude.Weekly.UsedPercent 'Claude weekly used percent'
+Assert-Equal 71 $claude.ContextUsedPercent 'Claude context percent'
+
+$missing = Get-ClaudeUsage -Path (Join-Path $fixtureDir 'missing.json')
+Assert-Equal $null $missing 'Missing Claude data'
+
+Write-Host 'All UsageData tests passed.' -ForegroundColor Green

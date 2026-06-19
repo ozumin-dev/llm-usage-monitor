@@ -1,0 +1,1 @@
+{"timestamp":"2026-06-19T01:34:39.232Z","type":"event_msg","payload":{"type":"token_count","rate_limits":{"limit_id":"codex","primary":{"used_percent":22.0,"window_minutes":300,"resets_at":1781850609},"secondary":{"used_percent":39.0,"window_minutes":10080,"resets_at":1782342454},"plan_type":"plus"}}}

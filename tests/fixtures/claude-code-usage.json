@@ -1,0 +1,8 @@
+{
+  "provider": "claude_code",
+  "model": "Opus Test",
+  "five_hour": { "used_percent": 20, "left_percent": 80, "resets_at_epoch": 1781870000 },
+  "weekly": { "used_percent": 93, "left_percent": 7, "resets_at_epoch": 1782300000 },
+  "context_window": { "used_percent": 71 },
+  "captured_at": "2026-06-19T10:00:00+09:00"
+}
