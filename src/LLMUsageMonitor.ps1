@@ -36,6 +36,16 @@ function Get-ActiveWindowPercent {
     return [double]$Window.UsedPercent
 }
 
+function Format-ResetRemainingShort {
+    param($Window, [DateTimeOffset]$Now = [DateTimeOffset]::Now)
+    if ($null -eq $Window -or $null -eq $Window.ResetsAtEpoch) { return '?' }
+    $seconds = [int64]$Window.ResetsAtEpoch - $Now.ToUnixTimeSeconds()
+    if ($seconds -le 0) { return '更新待ち' }
+    if ($seconds -lt 3600) { return ('{0}m' -f [Math]::Max(1, [Math]::Floor($seconds / 60))) }
+    if ($seconds -lt 86400) { return ('{0}h~' -f [Math]::Floor($seconds / 3600)) }
+    return ('{0}d~' -f [Math]::Floor($seconds / 86400))
+}
+
 function Set-ProviderTrayIcon {
     param(
         [ValidateSet('Codex', 'Claude')][string]$Provider,
@@ -54,7 +64,11 @@ function Set-ProviderTrayIcon {
     $label = if ($Provider -eq 'Claude') { 'Claude' } else { 'Codex' }
     $fiveText = if ($null -eq $five) { '?' } else { '{0:0.#}%' -f $five }
     $weekText = if ($null -eq $week) { '?' } else { '{0:0.#}%' -f $week }
-    $TrayIcon.Text = '{0} | 外側 5h {1} | 内側 7d {2}' -f $label, $fiveText, $weekText
+    $fiveReset = if ($null -ne $Usage) { Format-ResetRemainingShort $Usage.FiveHour } else { '?' }
+    $weekReset = if ($null -ne $Usage) { Format-ResetRemainingShort $Usage.Weekly } else { '?' }
+    $tooltip = '{0} | 5h {1}→{2} | 7d {3}→{4}' -f $label, $fiveText, $fiveReset, $weekText, $weekReset
+    if ($tooltip.Length -gt 63) { $tooltip = $tooltip.Substring(0, 63) }
+    $TrayIcon.Text = $tooltip
 }
 
 function Start-ClaudeDesktopUsageUpdate {
@@ -169,8 +183,12 @@ function Get-ProviderSummary {
     param($Usage)
     if ($null -eq $Usage) { return '待機中' }
     $parts = @()
-    if ($null -ne $Usage.FiveHour -and -not (Test-UsageWindowExpired $Usage.FiveHour)) { $parts += ('5h {0:0.#}%' -f $Usage.FiveHour.UsedPercent) }
-    if ($null -ne $Usage.Weekly -and -not (Test-UsageWindowExpired $Usage.Weekly)) { $parts += ('7d {0:0.#}%' -f $Usage.Weekly.UsedPercent) }
+    if ($null -ne $Usage.FiveHour -and -not (Test-UsageWindowExpired $Usage.FiveHour)) {
+        $parts += ('5h {0:0.#}%→{1}' -f $Usage.FiveHour.UsedPercent, (Format-ResetRemainingShort $Usage.FiveHour))
+    }
+    if ($null -ne $Usage.Weekly -and -not (Test-UsageWindowExpired $Usage.Weekly)) {
+        $parts += ('7d {0:0.#}%→{1}' -f $Usage.Weekly.UsedPercent, (Format-ResetRemainingShort $Usage.Weekly))
+    }
     if ($parts.Count -eq 0) { return '更新待ち' }
     return $parts -join ' / '
 }
