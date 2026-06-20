@@ -38,6 +38,7 @@ function Get-MonitorSettings {
         ShowClaudeTrayIcon = [bool](Get-SettingProperty $data 'show_claude_tray_icon' $true)
         LocalRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $refresh))
         ClaudeRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $claudeRefresh))
+        UsageAlertsEnabled = [bool](Get-SettingProperty $data 'usage_alerts_enabled' $true)
         ApiEnabled = [bool](Get-SettingProperty $data 'api_enabled' $true)
         ApiPort = [Math]::Max(1024, [Math]::Min(65535, $port))
     }
@@ -55,6 +56,7 @@ function Save-MonitorSettings {
         show_claude_tray_icon = [bool]$Settings.ShowClaudeTrayIcon
         local_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.LocalRefreshSeconds))
         claude_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.ClaudeRefreshSeconds))
+        usage_alerts_enabled = [bool]$Settings.UsageAlertsEnabled
         api_enabled = [bool]$Settings.ApiEnabled
         api_port = [Math]::Max(1024, [Math]::Min(65535, [int]$Settings.ApiPort))
     }

@@ -36,7 +36,12 @@
     $startupCheck.Location = New-Object System.Drawing.Point 16, 54
     $startupCheck.Size = New-Object System.Drawing.Size 220, 24
     $startupCheck.Checked = Test-MonitorStartupEnabled
-    $trayGroup.Controls.AddRange(@($codexCheck, $claudeCheck, $startupCheck))
+    $alertsCheck = New-Object System.Windows.Forms.CheckBox
+    $alertsCheck.Text = '80%・95%到達時に通知'
+    $alertsCheck.Location = New-Object System.Drawing.Point 205, 54
+    $alertsCheck.Size = New-Object System.Drawing.Size 180, 24
+    $alertsCheck.Checked = $settings.UsageAlertsEnabled
+    $trayGroup.Controls.AddRange(@($codexCheck, $claudeCheck, $startupCheck, $alertsCheck))
 
     $updateGroup = New-Object System.Windows.Forms.GroupBox
     $updateGroup.Text = '更新間隔'
@@ -113,6 +118,7 @@
             ShowClaudeTrayIcon = $claudeCheck.Checked
             LocalRefreshSeconds = [int]$localValue.Value
             ClaudeRefreshSeconds = [int]$claudeValue.Value
+            UsageAlertsEnabled = $alertsCheck.Checked
             ApiEnabled = $apiCheck.Checked
             ApiPort = [int]$portValue.Value
         }

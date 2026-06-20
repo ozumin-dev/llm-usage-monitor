@@ -27,6 +27,7 @@ if (-not $PSBoundParameters.ContainsKey('DisableApi')) { $DisableApi = -not $mon
 $showCodexTrayIcon = $monitorSettings.ShowCodexTrayIcon
 $showClaudeTrayIcon = $monitorSettings.ShowClaudeTrayIcon
 $claudeRefreshSeconds = $monitorSettings.ClaudeRefreshSeconds
+$usageAlertsEnabled = $monitorSettings.UsageAlertsEnabled
 
 $createdNew = $false
 $mutex = New-Object System.Threading.Mutex($true, 'Local\LLMUsageMonitor', [ref]$createdNew)
@@ -223,6 +224,7 @@ function Get-ProviderSummary {
 
 function Check-UsageAlerts {
     param($Usage)
+    if (-not $usageAlertsEnabled) { return }
     if ($null -eq $Usage) { return }
     foreach ($pair in @(@('5時間', $Usage.FiveHour), @('週間', $Usage.Weekly))) {
         $window = $pair[1]

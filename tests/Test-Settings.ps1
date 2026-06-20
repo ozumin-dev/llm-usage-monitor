@@ -14,6 +14,7 @@ try {
     Assert-Equal $true $defaults.ShowClaudeTrayIcon 'Default Claude icon'
     Assert-Equal 30 $defaults.LocalRefreshSeconds 'Default local refresh'
     Assert-Equal 300 $defaults.ClaudeRefreshSeconds 'Default Claude refresh'
+    Assert-Equal $true $defaults.UsageAlertsEnabled 'Default usage alerts state'
     Assert-Equal $true $defaults.ApiEnabled 'Default API state'
     Assert-Equal 47831 $defaults.ApiPort 'Default API port'
 
@@ -22,6 +23,7 @@ try {
         ShowClaudeTrayIcon = $false
         LocalRefreshSeconds = 12
         ClaudeRefreshSeconds = 45
+        UsageAlertsEnabled = $false
         ApiEnabled = $true
         ApiPort = 49001
     }
@@ -31,6 +33,7 @@ try {
     Assert-Equal $false $loaded.ShowClaudeTrayIcon 'Saved Claude icon'
     Assert-Equal 12 $loaded.LocalRefreshSeconds 'Saved local refresh'
     Assert-Equal 45 $loaded.ClaudeRefreshSeconds 'Saved Claude refresh'
+    Assert-Equal $false $loaded.UsageAlertsEnabled 'Saved usage alerts state'
     Assert-Equal 49001 $loaded.ApiPort 'Saved API port'
 
     [System.IO.File]::WriteAllText($legacyPath, '{"claude_refresh_minutes":7}', (New-Object System.Text.UTF8Encoding($false)))
