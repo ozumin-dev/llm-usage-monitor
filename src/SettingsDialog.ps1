@@ -34,7 +34,7 @@
     $startupCheck = New-Object System.Windows.Forms.CheckBox
     $startupCheck.Text = 'Windowsログイン時に開始'
     $startupCheck.Location = New-Object System.Drawing.Point 16, 54
-    $startupCheck.Size = New-Object System.Drawing.Size 220, 24
+    $startupCheck.Size = New-Object System.Drawing.Size 180, 24
     $startupCheck.Checked = Test-MonitorStartupEnabled
     $alertsCheck = New-Object System.Windows.Forms.CheckBox
     $alertsCheck.Text = '80%・95%到達時に通知'
