@@ -39,6 +39,7 @@ Copy-Item -LiteralPath (Join-Path $sourceDir 'usage_api.py') -Destination $insta
 Copy-Item -LiteralPath (Join-Path $sourceDir 'Settings.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'SettingsDialog.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'LLMUsageSettings.ps1') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'LaunchMonitor.vbs') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'CustomTrayIcon.example.ps1') -Destination $installDir -Force
 New-Item -ItemType Directory -Force -Path (Join-Path $installDir 'icons') | Out-Null
 
@@ -79,8 +80,8 @@ $state | ConvertTo-Json -Depth 20 | Set-Content -LiteralPath $statePath -Encodin
 if (-not $NoStartup) {
     $shell = New-Object -ComObject WScript.Shell
     $shortcut = $shell.CreateShortcut($startupPath)
-    $shortcut.TargetPath = (Get-Command powershell.exe).Source
-    $shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageMonitor.ps1')
+    $shortcut.TargetPath = (Get-Command wscript.exe).Source
+    $shortcut.Arguments = '"{0}"' -f (Join-Path $installDir 'LaunchMonitor.vbs')
     $shortcut.WorkingDirectory = $installDir
     $shortcut.Description = 'LLM Usage Monitor'
     $shortcut.Save()
@@ -88,8 +89,8 @@ if (-not $NoStartup) {
 
 $shell = New-Object -ComObject WScript.Shell
 $monitorShortcut = $shell.CreateShortcut($monitorShortcutPath)
-$monitorShortcut.TargetPath = (Get-Command powershell.exe).Source
-$monitorShortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageMonitor.ps1')
+$monitorShortcut.TargetPath = (Get-Command wscript.exe).Source
+$monitorShortcut.Arguments = '"{0}"' -f (Join-Path $installDir 'LaunchMonitor.vbs')
 $monitorShortcut.WorkingDirectory = $installDir
 $monitorShortcut.WindowStyle = 7
 $monitorShortcut.Description = 'Start LLM Usage Monitor'
@@ -97,14 +98,13 @@ $monitorShortcut.Save()
 
 $settingsShortcut = $shell.CreateShortcut($settingsShortcutPath)
 $settingsShortcut.TargetPath = (Get-Command powershell.exe).Source
-$settingsShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageSettings.ps1')
+$settingsShortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageSettings.ps1')
 $settingsShortcut.WorkingDirectory = $installDir
 $settingsShortcut.Description = 'Configure LLM Usage Monitor'
 $settingsShortcut.Save()
 
 if (-not $NoLaunch) {
-    $arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageMonitor.ps1')
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList $arguments
+    Start-Process wscript.exe -WindowStyle Hidden -ArgumentList ('"{0}"' -f (Join-Path $installDir 'LaunchMonitor.vbs'))
 }
 
 Write-Host 'LLM Usage Monitor をインストールしました。'

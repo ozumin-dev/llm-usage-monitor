@@ -17,5 +17,5 @@ if (Show-MonitorSettingsDialog -MonitorScript $monitorScript) {
         Where-Object { $_.Name -in @('python.exe', 'pythonw.exe') -and $_.CommandLine -match '(?i)LLMUsageMonitor[\\/]usage_api\.py' } |
         ForEach-Object { Invoke-CimMethod -InputObject $_ -MethodName Terminate -ErrorAction SilentlyContinue | Out-Null }
     Start-Sleep -Milliseconds 300
-    Start-Process powershell.exe -WindowStyle Hidden -ArgumentList ('-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $monitorScript)
+    Start-Process wscript.exe -WindowStyle Hidden -ArgumentList ('"{0}"' -f (Join-Path $PSScriptRoot 'LaunchMonitor.vbs'))
 }

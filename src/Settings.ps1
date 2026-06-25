@@ -78,8 +78,9 @@ function Set-MonitorStartupEnabled {
     if ($Enabled) {
         $shell = New-Object -ComObject WScript.Shell
         $shortcut = $shell.CreateShortcut($shortcutPath)
-        $shortcut.TargetPath = (Get-Command powershell.exe).Source
-        $shortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f $MonitorScript
+        $launcher = Join-Path (Split-Path -Parent $MonitorScript) 'LaunchMonitor.vbs'
+        $shortcut.TargetPath = (Get-Command wscript.exe).Source
+        $shortcut.Arguments = '"{0}"' -f $launcher
         $shortcut.WorkingDirectory = Split-Path -Parent $MonitorScript
         $shortcut.Description = 'LLM Usage Monitor'
         $shortcut.Save()
