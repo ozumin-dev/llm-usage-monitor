@@ -9,6 +9,7 @@ $ErrorActionPreference = 'Stop'
 $installDir = Join-Path $env:LOCALAPPDATA 'LLMUsageMonitor'
 $sourceDir = Join-Path $PSScriptRoot 'src'
 $startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\LLM Usage Monitor.lnk'
+$monitorShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LLM Usage Monitor.lnk'
 $settingsShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LLM Usage Monitor Settings.lnk'
 $statePath = Join-Path $installDir 'install-state.json'
 
@@ -86,6 +87,14 @@ if (-not $NoStartup) {
 }
 
 $shell = New-Object -ComObject WScript.Shell
+$monitorShortcut = $shell.CreateShortcut($monitorShortcutPath)
+$monitorShortcut.TargetPath = (Get-Command powershell.exe).Source
+$monitorShortcut.Arguments = '-NoProfile -WindowStyle Hidden -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageMonitor.ps1')
+$monitorShortcut.WorkingDirectory = $installDir
+$monitorShortcut.WindowStyle = 7
+$monitorShortcut.Description = 'Start LLM Usage Monitor'
+$monitorShortcut.Save()
+
 $settingsShortcut = $shell.CreateShortcut($settingsShortcutPath)
 $settingsShortcut.TargetPath = (Get-Command powershell.exe).Source
 $settingsShortcut.Arguments = '-NoProfile -ExecutionPolicy Bypass -File "{0}"' -f (Join-Path $installDir 'LLMUsageSettings.ps1')

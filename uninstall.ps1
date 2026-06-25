@@ -5,9 +5,11 @@ $ErrorActionPreference = 'Stop'
 $installDir = Join-Path $env:LOCALAPPDATA 'LLMUsageMonitor'
 $statePath = Join-Path $installDir 'install-state.json'
 $startupPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\Startup\LLM Usage Monitor.lnk'
+$monitorShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LLM Usage Monitor.lnk'
 $settingsShortcutPath = Join-Path $env:APPDATA 'Microsoft\Windows\Start Menu\Programs\LLM Usage Monitor Settings.lnk'
 
 if (Test-Path -LiteralPath $startupPath) { Remove-Item -LiteralPath $startupPath -Force }
+if (Test-Path -LiteralPath $monitorShortcutPath) { Remove-Item -LiteralPath $monitorShortcutPath -Force }
 if (Test-Path -LiteralPath $settingsShortcutPath) { Remove-Item -LiteralPath $settingsShortcutPath -Force }
 
 Get-CimInstance Win32_Process -Filter "Name='powershell.exe'" -ErrorAction SilentlyContinue |
