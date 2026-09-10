@@ -1,5 +1,5 @@
 # Copy this file to CustomTrayIcon.ps1 in the installed application folder.
-# Place codex.ico and/or claude.ico in the adjacent icons folder.
+# Place codex.ico, claude.ico and/or antigravity.ico in the adjacent icons folder.
 # Return $null to keep using the built-in dynamic usage icon.
 function New-CustomProviderUsageIcon {
     [CmdletBinding()]

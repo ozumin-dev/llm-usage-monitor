@@ -34,6 +34,9 @@ Copy-Item -LiteralPath (Join-Path $sourceDir 'UsageData.ps1') -Destination $inst
 Copy-Item -LiteralPath (Join-Path $sourceDir 'LLMUsageMonitor.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'claude-statusline.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'claude-desktop-usage.py') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'codex-usage.py') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'codex-reset-credit.py') -Destination $installDir -Force
+Copy-Item -LiteralPath (Join-Path $sourceDir 'agy-usage.py') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'TrayIcon.ps1') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'usage_api.py') -Destination $installDir -Force
 Copy-Item -LiteralPath (Join-Path $sourceDir 'Settings.ps1') -Destination $installDir -Force

@@ -12,6 +12,7 @@ try {
     $defaults = Get-MonitorSettings -Path $path
     Assert-Equal $true $defaults.ShowCodexTrayIcon 'Default Codex icon'
     Assert-Equal $true $defaults.ShowClaudeTrayIcon 'Default Claude icon'
+    Assert-Equal $true $defaults.ShowAntigravityTrayIcon 'Default Antigravity icon'
     Assert-Equal 30 $defaults.LocalRefreshSeconds 'Default local refresh'
     Assert-Equal 300 $defaults.ClaudeRefreshSeconds 'Default Claude refresh'
     Assert-Equal $true $defaults.UsageAlertsEnabled 'Default usage alerts state'
@@ -35,6 +36,11 @@ try {
     Assert-Equal 45 $loaded.ClaudeRefreshSeconds 'Saved Claude refresh'
     Assert-Equal $false $loaded.UsageAlertsEnabled 'Saved usage alerts state'
     Assert-Equal 49001 $loaded.ApiPort 'Saved API port'
+    Assert-Equal $true $loaded.ShowAntigravityTrayIcon 'Antigravity icon defaults on when the caller omits it'
+
+    $changed | Add-Member -NotePropertyName ShowAntigravityTrayIcon -NotePropertyValue $false
+    Save-MonitorSettings -Settings $changed -Path $path
+    Assert-Equal $false (Get-MonitorSettings -Path $path).ShowAntigravityTrayIcon 'Saved Antigravity icon'
 
     [System.IO.File]::WriteAllText($legacyPath, '{"claude_refresh_minutes":7}', (New-Object System.Text.UTF8Encoding($false)))
     $migrated = Get-MonitorSettings -Path $legacyPath

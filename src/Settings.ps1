@@ -36,6 +36,7 @@ function Get-MonitorSettings {
     return [pscustomobject]@{
         ShowCodexTrayIcon = [bool](Get-SettingProperty $data 'show_codex_tray_icon' $true)
         ShowClaudeTrayIcon = [bool](Get-SettingProperty $data 'show_claude_tray_icon' $true)
+        ShowAntigravityTrayIcon = [bool](Get-SettingProperty $data 'show_antigravity_tray_icon' $true)
         LocalRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $refresh))
         ClaudeRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $claudeRefresh))
         UsageAlertsEnabled = [bool](Get-SettingProperty $data 'usage_alerts_enabled' $true)
@@ -54,6 +55,7 @@ function Save-MonitorSettings {
         schema_version = 1
         show_codex_tray_icon = [bool]$Settings.ShowCodexTrayIcon
         show_claude_tray_icon = [bool]$Settings.ShowClaudeTrayIcon
+        show_antigravity_tray_icon = [bool](Get-SettingProperty $Settings 'ShowAntigravityTrayIcon' $true)
         local_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.LocalRefreshSeconds))
         claude_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.ClaudeRefreshSeconds))
         usage_alerts_enabled = [bool]$Settings.UsageAlertsEnabled

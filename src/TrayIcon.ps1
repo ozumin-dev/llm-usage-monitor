@@ -14,38 +14,86 @@ namespace LLMUsageMonitor {
 }
 
 function Get-ProviderBaseColor {
-    param([ValidateSet('Codex', 'Claude')][string]$Provider)
+    param([ValidateSet('Codex', 'Claude', 'Antigravity')][string]$Provider)
     if ($Provider -eq 'Codex') { return [System.Drawing.ColorTranslator]::FromHtml('#19BCE4') }
+    if ($Provider -eq 'Antigravity') { return [System.Drawing.ColorTranslator]::FromHtml('#8B7CF6') }
     return [System.Drawing.ColorTranslator]::FromHtml('#D97757')
+}
+
+function Get-ProviderTrackColor {
+    # Unused (remaining) share: a mid-lightness tint of each provider's colour,
+    # light enough that 0% never reads like the dark-red "exhausted" state and
+    # still identifies the icon.
+    param([ValidateSet('Codex', 'Claude', 'Antigravity')][string]$Provider)
+    if ($Provider -eq 'Codex') { return [System.Drawing.ColorTranslator]::FromHtml('#3E8FA3') }
+    if ($Provider -eq 'Antigravity') { return [System.Drawing.ColorTranslator]::FromHtml('#6F66B8') }
+    return [System.Drawing.ColorTranslator]::FromHtml('#A07A68')
 }
 
 function Get-UsageChartColor {
     param(
-        [ValidateSet('Codex', 'Claude')][string]$Provider,
+        [ValidateSet('Codex', 'Claude', 'Antigravity')][string]$Provider,
         [Nullable[double]]$UsedPercent
     )
     if ($null -eq $UsedPercent) { return [System.Drawing.Color]::FromArgb(135, 145, 155) }
 
+    # Exhausted (100%) is dark red for every provider; grey read as "empty" on a
+    # dark taskbar.
+    if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#9B1C1C') }
+
+    if ($Provider -eq 'Antigravity') {
+        if ($UsedPercent -ge 90) { return [System.Drawing.ColorTranslator]::FromHtml('#F04444') }
+        if ($UsedPercent -ge 70) { return [System.Drawing.ColorTranslator]::FromHtml('#FFB000') }
+        return [System.Drawing.ColorTranslator]::FromHtml('#A99BFF')
+    }
+
     if ($Provider -eq 'Codex') {
-        if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#4B5563') }
         if ($UsedPercent -ge 90) { return [System.Drawing.ColorTranslator]::FromHtml('#F04444') }
         if ($UsedPercent -ge 70) { return [System.Drawing.ColorTranslator]::FromHtml('#FFB000') }
         return [System.Drawing.ColorTranslator]::FromHtml('#32C7F0')
     }
 
-    if ($UsedPercent -ge 99.95) { return [System.Drawing.ColorTranslator]::FromHtml('#4B5563') }
-    if ($UsedPercent -ge 90) { return [System.Drawing.ColorTranslator]::FromHtml('#C026D3') }
-    if ($UsedPercent -ge 70) { return [System.Drawing.ColorTranslator]::FromHtml('#FF7A00') }
+    # Claude: hue steps that stay distinct at 16 px (orange -> yellow -> red).
+    if ($UsedPercent -ge 90) { return [System.Drawing.ColorTranslator]::FromHtml('#FF3B30') }
+    if ($UsedPercent -ge 70) { return [System.Drawing.ColorTranslator]::FromHtml('#FFD60A') }
     return [System.Drawing.ColorTranslator]::FromHtml('#D97757')
+}
+
+function Draw-ScopedLimitGauge {
+    # Per-model weekly cap (Claude Fable) as a square gauge on the bottom layer,
+    # visible only in the corners outside the circle. Sweeps clockwise from
+    # 12 o'clock like the other gauges. Same colour steps as the body; a dark
+    # rim around the circle keeps red corners from swallowing the body.
+    param($Graphics, [double]$UsedPercent, [int]$Size)
+    $scale = $Size / 32.0
+    $corners = New-Object System.Drawing.Region (New-Object System.Drawing.RectangleF 0, 0, $Size, $Size)
+    $circle = New-Object System.Drawing.Drawing2D.GraphicsPath
+    $circle.AddEllipse((1.2 * $scale), (1.2 * $scale), (29.6 * $scale), (29.6 * $scale))
+    $corners.Exclude($circle)
+    $Graphics.SetClip($corners, [System.Drawing.Drawing2D.CombineMode]::Replace)
+
+    $trackBrush = New-Object System.Drawing.SolidBrush (Get-ProviderTrackColor 'Claude')
+    $Graphics.FillRectangle($trackBrush, 0, 0, $Size, $Size)
+    $used = [Math]::Max(0, [Math]::Min(100, $UsedPercent))
+    if ($used -gt 0) {
+        $fillBrush = New-Object System.Drawing.SolidBrush (Get-UsageChartColor 'Claude' $used)
+        $Graphics.FillPie($fillBrush, (-$Size / 2), (-$Size / 2), (2 * $Size), (2 * $Size), -90, [single](3.6 * $used))
+        $fillBrush.Dispose()
+    }
+    $Graphics.ResetClip()
+    $rim = New-Object System.Drawing.Pen ([System.Drawing.ColorTranslator]::FromHtml('#111111')), (2.8 * $scale)
+    $Graphics.DrawEllipse($rim, (1.2 * $scale), (1.2 * $scale), (29.6 * $scale), (29.6 * $scale))
+    $rim.Dispose(); $trackBrush.Dispose(); $circle.Dispose(); $corners.Dispose()
 }
 
 function New-ProviderUsageBitmap {
     param(
-        [ValidateSet('Codex', 'Claude')][string]$Provider,
+        [ValidateSet('Codex', 'Claude', 'Antigravity')][string]$Provider,
         [Nullable[double]]$FiveHourUsed,
         [Nullable[double]]$WeeklyUsed,
         [Nullable[double]]$FiveHourResetRemainingPercent = $null,
-        [int]$Size = 32
+        [int]$Size = 32,
+        [Nullable[double]]$ScopedUsed = $null
     )
 
     $bitmap = New-Object System.Drawing.Bitmap $Size, $Size, ([System.Drawing.Imaging.PixelFormat]::Format32bppArgb)
@@ -55,10 +103,16 @@ function New-ProviderUsageBitmap {
 
     $scale = $Size / 32.0
     $base = Get-ProviderBaseColor $Provider
-    $track = if ($Provider -eq 'Codex') {
-        [System.Drawing.ColorTranslator]::FromHtml('#183B47')
-    } else {
-        [System.Drawing.ColorTranslator]::FromHtml('#4A2E27')
+    $track = Get-ProviderTrackColor $Provider
+    # Claude: once either window reaches 90%, the whole icon turns red so a
+    # nearly-full weekly (the small inner pie) is not missed at 16 px.
+    $peak = @($FiveHourUsed, $WeeklyUsed) | Where-Object { $null -ne $_ } | Measure-Object -Maximum
+    if ($Provider -eq 'Claude' -and $peak.Count -gt 0 -and $peak.Maximum -ge 90) {
+        $base = [System.Drawing.ColorTranslator]::FromHtml('#FF3B30')
+        $track = [System.Drawing.ColorTranslator]::FromHtml('#6B1111')
+    }
+    if ($null -ne $ScopedUsed) {
+        Draw-ScopedLimitGauge $graphics ([double]$ScopedUsed) $Size
     }
 
     # Keep the usage ring inside the reset-time markers so both remain legible
@@ -122,18 +176,20 @@ function New-ProviderUsageBitmap {
     $innerPen = New-Object System.Drawing.Pen $base, (1.4 * $scale)
     $graphics.DrawEllipse($innerPen, $innerRect)
 
+
     $innerPen.Dispose(); $innerTrackBrush.Dispose(); $resetTrackPen.Dispose(); $trackPen.Dispose(); $graphics.Dispose()
     return $bitmap
 }
 
 function New-ProviderUsageIcon {
     param(
-        [ValidateSet('Codex', 'Claude')][string]$Provider,
+        [ValidateSet('Codex', 'Claude', 'Antigravity')][string]$Provider,
         [Nullable[double]]$FiveHourUsed,
         [Nullable[double]]$WeeklyUsed,
-        [Nullable[double]]$FiveHourResetRemainingPercent = $null
+        [Nullable[double]]$FiveHourResetRemainingPercent = $null,
+        [Nullable[double]]$ScopedUsed = $null
     )
-    $bitmap = New-ProviderUsageBitmap $Provider $FiveHourUsed $WeeklyUsed $FiveHourResetRemainingPercent 32
+    $bitmap = New-ProviderUsageBitmap $Provider $FiveHourUsed $WeeklyUsed $FiveHourResetRemainingPercent 32 $ScopedUsed
     $handle = $bitmap.GetHicon()
     try {
         return [System.Drawing.Icon]::FromHandle($handle).Clone()
@@ -149,7 +205,8 @@ function New-MonitorTrayIcon {
         [string]$Provider,
         [Nullable[double]]$FiveHourUsed,
         [Nullable[double]]$WeeklyUsed,
-        [Nullable[double]]$FiveHourResetRemainingPercent = $null
+        [Nullable[double]]$FiveHourResetRemainingPercent = $null,
+        [Nullable[double]]$ScopedUsed = $null
     )
 
     $customRenderer = Get-Command -Name 'New-CustomProviderUsageIcon' -CommandType Function -ErrorAction SilentlyContinue
@@ -169,5 +226,5 @@ function New-MonitorTrayIcon {
         }
     }
 
-    return New-ProviderUsageIcon $Provider $FiveHourUsed $WeeklyUsed $FiveHourResetRemainingPercent
+    return New-ProviderUsageIcon $Provider $FiveHourUsed $WeeklyUsed $FiveHourResetRemainingPercent $ScopedUsed
 }

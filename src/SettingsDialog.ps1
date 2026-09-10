@@ -9,7 +9,7 @@
     $settings = Get-MonitorSettings -Path $SettingsPath
     $dialog = New-Object System.Windows.Forms.Form
     $dialog.Text = 'LLM Usage Monitor Settings'
-    $dialog.ClientSize = New-Object System.Drawing.Size 420, 390
+    $dialog.ClientSize = New-Object System.Drawing.Size 420, 418
     $dialog.StartPosition = [System.Windows.Forms.FormStartPosition]::CenterScreen
     $dialog.FormBorderStyle = [System.Windows.Forms.FormBorderStyle]::FixedDialog
     $dialog.MaximizeBox = $false
@@ -20,7 +20,7 @@
     $trayGroup = New-Object System.Windows.Forms.GroupBox
     $trayGroup.Text = 'タスクトレイ'
     $trayGroup.Location = New-Object System.Drawing.Point 12, 12
-    $trayGroup.Size = New-Object System.Drawing.Size 396, 90
+    $trayGroup.Size = New-Object System.Drawing.Size 396, 118
     $codexCheck = New-Object System.Windows.Forms.CheckBox
     $codexCheck.Text = 'Codexアイコンを表示'
     $codexCheck.Location = New-Object System.Drawing.Point 16, 24
@@ -31,9 +31,14 @@
     $claudeCheck.Location = New-Object System.Drawing.Point 205, 24
     $claudeCheck.Size = New-Object System.Drawing.Size 180, 24
     $claudeCheck.Checked = $settings.ShowClaudeTrayIcon
+    $antigravityCheck = New-Object System.Windows.Forms.CheckBox
+    $antigravityCheck.Text = 'Antigravityアイコンを表示'
+    $antigravityCheck.Location = New-Object System.Drawing.Point 16, 54
+    $antigravityCheck.Size = New-Object System.Drawing.Size 180, 24
+    $antigravityCheck.Checked = $settings.ShowAntigravityTrayIcon
     $startupCheck = New-Object System.Windows.Forms.CheckBox
     $startupCheck.Text = 'Windowsログイン時に開始'
-    $startupCheck.Location = New-Object System.Drawing.Point 16, 54
+    $startupCheck.Location = New-Object System.Drawing.Point 16, 84
     $startupCheck.Size = New-Object System.Drawing.Size 180, 24
     $startupCheck.Checked = Test-MonitorStartupEnabled
     $alertsCheck = New-Object System.Windows.Forms.CheckBox
@@ -41,11 +46,11 @@
     $alertsCheck.Location = New-Object System.Drawing.Point 205, 54
     $alertsCheck.Size = New-Object System.Drawing.Size 180, 24
     $alertsCheck.Checked = $settings.UsageAlertsEnabled
-    $trayGroup.Controls.AddRange(@($codexCheck, $claudeCheck, $startupCheck, $alertsCheck))
+    $trayGroup.Controls.AddRange(@($codexCheck, $claudeCheck, $antigravityCheck, $startupCheck, $alertsCheck))
 
     $updateGroup = New-Object System.Windows.Forms.GroupBox
     $updateGroup.Text = '更新間隔'
-    $updateGroup.Location = New-Object System.Drawing.Point 12, 112
+    $updateGroup.Location = New-Object System.Drawing.Point 12, 140
     $updateGroup.Size = New-Object System.Drawing.Size 396, 100
     $localLabel = New-Object System.Windows.Forms.Label
     $localLabel.Text = 'ローカル表示・Codex'
@@ -73,7 +78,7 @@
 
     $apiGroup = New-Object System.Windows.Forms.GroupBox
     $apiGroup.Text = 'ローカルAPI'
-    $apiGroup.Location = New-Object System.Drawing.Point 12, 222
+    $apiGroup.Location = New-Object System.Drawing.Point 12, 250
     $apiGroup.Size = New-Object System.Drawing.Size 396, 82
     $apiCheck = New-Object System.Windows.Forms.CheckBox
     $apiCheck.Text = 'APIを有効化（127.0.0.1のみ）'
@@ -93,29 +98,30 @@
     $apiGroup.Controls.AddRange(@($apiCheck, $portLabel, $portValue))
 
     $note = New-Object System.Windows.Forms.Label
-    $note.Text = '両方のアイコンを非表示にするとAPI専用モードになります。設定はスタートメニューから再度開けます。'
-    $note.Location = New-Object System.Drawing.Point 14, 314
+    $note.Text = 'すべてのアイコンを非表示にするとAPI専用モードになります｡設定はスタートメニューから再度開けます｡'
+    $note.Location = New-Object System.Drawing.Point 14, 342
     $note.Size = New-Object System.Drawing.Size 390, 35
     $note.ForeColor = [System.Drawing.Color]::DimGray
 
     $cancelButton = New-Object System.Windows.Forms.Button
     $cancelButton.Text = 'キャンセル'
     $cancelButton.DialogResult = [System.Windows.Forms.DialogResult]::Cancel
-    $cancelButton.Location = New-Object System.Drawing.Point 224, 354
+    $cancelButton.Location = New-Object System.Drawing.Point 204, 382
     $cancelButton.Size = New-Object System.Drawing.Size 86, 28
     $saveButton = New-Object System.Windows.Forms.Button
     $saveButton.Text = '保存して再起動'
-    $saveButton.Location = New-Object System.Drawing.Point 318, 354
-    $saveButton.Size = New-Object System.Drawing.Size 90, 28
+    $saveButton.Location = New-Object System.Drawing.Point 298, 382
+    $saveButton.Size = New-Object System.Drawing.Size 110, 28
 
     $saveButton.Add_Click({
-        if (-not $codexCheck.Checked -and -not $claudeCheck.Checked -and -not $apiCheck.Checked) {
+        if (-not $codexCheck.Checked -and -not $claudeCheck.Checked -and -not $antigravityCheck.Checked -and -not $apiCheck.Checked) {
             [System.Windows.Forms.MessageBox]::Show('少なくとも1つのトレイアイコン、またはAPIを有効にしてください。', 'LLM Usage Monitor') | Out-Null
             return
         }
         $newSettings = [pscustomobject]@{
             ShowCodexTrayIcon = $codexCheck.Checked
             ShowClaudeTrayIcon = $claudeCheck.Checked
+            ShowAntigravityTrayIcon = $antigravityCheck.Checked
             LocalRefreshSeconds = [int]$localValue.Value
             ClaudeRefreshSeconds = [int]$claudeValue.Value
             UsageAlertsEnabled = $alertsCheck.Checked

@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import sys
 import tempfile
 import time
@@ -28,6 +29,31 @@ class UsageError(RuntimeError):
     pass
 
 
+def sanitize_error_detail(value: str) -> str:
+    value = value.replace("\r", " ").replace("\n", " ").strip()
+    value = re.sub(
+        r'(?i)("?(?:access|refresh)[_-]?token"?\s*[:=]\s*")([^"]+)(")',
+        r"\1<redacted>\3",
+        value,
+    )
+    value = re.sub(r"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]+", r"\1<redacted>", value)
+    if len(value) > 800:
+        value = value[:797] + "..."
+    return value
+
+
+def append_log(path: str | None, message: str) -> None:
+    if not path:
+        return
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(path)), exist_ok=True)
+        timestamp = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+        with open(path, "a", encoding="utf-8") as stream:
+            stream.write(f"{timestamp} {message}\n")
+    except OSError:
+        pass
+
+
 def request_json(url: str, *, headers: dict[str, str], body: dict | None = None) -> dict:
     data = json.dumps(body).encode("utf-8") if body is not None else None
     request = urllib.request.Request(url, data=data, headers=headers, method="POST" if data else "GET")
@@ -35,7 +61,15 @@ def request_json(url: str, *, headers: dict[str, str], body: dict | None = None)
         with urllib.request.urlopen(request, timeout=15) as response:
             return json.load(response)
     except urllib.error.HTTPError as exc:
-        raise UsageError(f"HTTP {exc.code} from Anthropic") from None
+        detail = ""
+        try:
+            detail = sanitize_error_detail(exc.read().decode("utf-8", "replace"))
+        except Exception:
+            detail = ""
+        message = f"HTTP {exc.code} from Anthropic"
+        if detail:
+            message = f"{message}: {detail}"
+        raise UsageError(message) from None
     except urllib.error.URLError as exc:
         raise UsageError(f"Could not reach Anthropic: {exc.reason}") from None
 
@@ -114,6 +148,33 @@ def normalize_window(window) -> dict:
     }
 
 
+def find_scoped_limit(usage: dict, model_display_name: str) -> dict | None:
+    """Per-model weekly cap (e.g. Fable) from the limits[] array.
+
+    It appears as kind "weekly_scoped" with scope.model.display_name; the entry
+    may be absent in weeks the model was not used.
+    """
+    for entry in usage.get("limits") or []:
+        if not isinstance(entry, dict) or entry.get("kind") != "weekly_scoped":
+            continue
+        model = (entry.get("scope") or {}).get("model") or {}
+        if str(model.get("display_name", "")).lower() == model_display_name.lower():
+            return entry
+    return None
+
+
+def normalize_scoped_window(entry: dict | None) -> dict:
+    if not entry or entry.get("percent") is None:
+        return {"used_percent": None, "left_percent": None, "resets_at_epoch": None}
+    used = max(0.0, min(100.0, float(entry["percent"])))
+    return {
+        "used_percent": used,
+        "left_percent": 100.0 - used,
+        "resets_at_epoch": epoch_seconds(entry.get("resets_at")),
+        "is_active": entry.get("is_active"),
+    }
+
+
 def fetch_usage(credential_path: str) -> dict:
     try:
         with open(credential_path, encoding="utf-8") as stream:
@@ -153,9 +214,11 @@ def fetch_usage(credential_path: str) -> dict:
 def main() -> int:
     default_credentials = os.path.join(os.path.expanduser("~"), ".claude", ".credentials.json")
     default_output = os.path.join(os.path.expanduser("~"), ".ai-usage", "claude-desktop-usage.json")
+    default_log = os.path.join(os.path.expanduser("~"), ".ai-usage", "claude-desktop-usage.log")
     parser = argparse.ArgumentParser()
     parser.add_argument("--credentials", default=default_credentials)
     parser.add_argument("--output", default=default_output)
+    parser.add_argument("--log", default=default_log)
     args = parser.parse_args()
 
     try:
@@ -165,6 +228,8 @@ def main() -> int:
             "model": "Claude Desktop Code",
             "five_hour": normalize_window(usage.get("five_hour")),
             "weekly": normalize_window(usage.get("seven_day")),
+            # Fable's own cap within the weekly limit (50% of it on Max).
+            "fable": normalize_scoped_window(find_scoped_limit(usage, "Fable")),
             "context_window": None,
             "source": "claude_oauth_usage_api",
             "captured_at": datetime.now(timezone.utc).astimezone().isoformat(),
@@ -172,10 +237,14 @@ def main() -> int:
         atomic_json_write(os.path.abspath(args.output), result)
         five = result["five_hour"]["used_percent"]
         week = result["weekly"]["used_percent"]
-        print(f"Claude usage updated: 5h={five}% 7d={week}%")
+        fable = result["fable"]["used_percent"]
+        print(f"Claude usage updated: 5h={five}% 7d={week}% fable={fable}%")
+        append_log(args.log, f"updated 5h={five}% 7d={week}% fable={fable}%")
         return 0
     except UsageError as exc:
-        print(f"Claude usage update failed: {exc}", file=sys.stderr)
+        message = f"Claude usage update failed: {exc}"
+        print(message, file=sys.stderr)
+        append_log(args.log, message)
         return 1
 
 

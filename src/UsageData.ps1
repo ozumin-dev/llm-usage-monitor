@@ -45,6 +45,86 @@ function New-UsageWindow {
 function Get-CodexUsage {
     [CmdletBinding()]
     param(
+        [string]$Path = (Join-Path $HOME '.ai-usage\codex-usage.json'),
+        [int]$MaxAgeSeconds = 900
+    )
+
+    # Primary: the official app-server rate limits written by codex-usage.py
+    # (live, authoritative, and carries the account's reset credits). Fall back
+    # to scraping session events only if that file is missing or stale.
+    if (Test-Path -LiteralPath $Path) {
+        try {
+            $data = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+            $capturedAt = [DateTimeOffset]::Parse((Get-ObjectProperty $data 'captured_at'))
+            if (([DateTimeOffset]::Now - $capturedAt).TotalSeconds -le $MaxAgeSeconds) {
+                return [pscustomobject]@{
+                    Provider = 'Codex'
+                    Model = $null
+                    Plan = Get-ObjectProperty $data 'plan'
+                    FiveHour = New-UsageWindow (Get-ObjectProperty $data 'five_hour')
+                    Weekly = New-UsageWindow (Get-ObjectProperty $data 'weekly')
+                    ContextUsedPercent = $null
+                    ResetCredits = Get-ObjectProperty $data 'reset_credits'
+                    CapturedAt = $capturedAt
+                    Source = 'codex_app_server_ratelimits'
+                }
+            }
+        } catch {
+            # fall through to the session scrape
+        }
+    }
+
+    return Get-CodexUsageFromSessions
+}
+
+function Get-AntigravityUsage {
+    [CmdletBinding()]
+    param(
+        [string]$Path = (Join-Path $HOME '.ai-usage\agy-usage.json'),
+        [int]$MaxAgeSeconds = 3600
+    )
+
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    try {
+        $data = Get-Content -Raw -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop
+        $capturedAt = [DateTimeOffset]::Parse((Get-ObjectProperty $data 'captured_at'))
+    } catch {
+        return $null
+    }
+    if (([DateTimeOffset]::Now - $capturedAt).TotalSeconds -gt $MaxAgeSeconds) { return $null }
+
+    # Parsed per-family windows for the GUI; the raw families object is what the
+    # API exposes.
+    $families = Get-ObjectProperty $data 'families'
+    $familyUsages = @()
+    if ($null -ne $families) {
+        foreach ($property in $families.PSObject.Properties) {
+            $familyUsages += [pscustomobject]@{
+                Key = $property.Name
+                Label = Get-ObjectProperty $property.Value 'label'
+                FiveHour = New-UsageWindow (Get-ObjectProperty $property.Value 'five_hour')
+                Weekly = New-UsageWindow (Get-ObjectProperty $property.Value 'weekly')
+            }
+        }
+    }
+
+    [pscustomobject]@{
+        Provider = 'Antigravity'
+        Model = Get-ObjectProperty $data 'model'
+        Plan = $null
+        FiveHour = New-UsageWindow (Get-ObjectProperty $data 'five_hour')
+        Weekly = New-UsageWindow (Get-ObjectProperty $data 'weekly')
+        ContextUsedPercent = $null
+        Families = $families
+        FamilyUsages = $familyUsages
+        CapturedAt = $capturedAt
+        Source = 'agy_usage_report'
+    }
+}
+
+function Get-CodexUsageFromSessions {
+    [CmdletBinding()]
+    param(
         [string[]]$SearchRoots = @(
             (Join-Path $HOME '.codex\sessions'),
             (Join-Path $HOME '.codex\archived_sessions')
@@ -123,6 +203,7 @@ function Get-ClaudeUsage {
         Plan = $null
         FiveHour = New-UsageWindow (Get-ObjectProperty $data 'five_hour')
         Weekly = New-UsageWindow (Get-ObjectProperty $data 'weekly')
+        Fable = New-UsageWindow (Get-ObjectProperty $data 'fable')
         ContextUsedPercent = if ($null -ne (Get-ObjectProperty $data 'context_window')) {
             ConvertTo-NullableDouble (Get-ObjectProperty (Get-ObjectProperty $data 'context_window') 'used_percent')
         } else { $null }
@@ -135,6 +216,7 @@ function Get-UsageSnapshot {
     [pscustomobject]@{
         Codex = Get-CodexUsage
         Claude = Get-ClaudeUsage
+        Antigravity = Get-AntigravityUsage
         ReadAt = [DateTimeOffset]::Now
     }
 }
@@ -161,7 +243,7 @@ function ConvertTo-ApiProviderUsage {
     if ($null -eq $Usage) {
         return [ordered]@{ available = $false }
     }
-    return [ordered]@{
+    $result = [ordered]@{
         available = $true
         model = $Usage.Model
         plan = $Usage.Plan
@@ -173,6 +255,15 @@ function ConvertTo-ApiProviderUsage {
         source = $Usage.Source
         captured_at = $Usage.CapturedAt.ToString('o')
     }
+    # Provider-specific extras: Claude Fable cap, Codex reset credits,
+    # Antigravity quota families.
+    $fable = Get-ObjectProperty $Usage 'Fable'
+    if ($null -ne $fable) { $result['fable'] = ConvertTo-ApiUsageWindow $fable $Now }
+    $credits = Get-ObjectProperty $Usage 'ResetCredits'
+    if ($null -ne $credits) { $result['reset_credits'] = $credits }
+    $families = Get-ObjectProperty $Usage 'Families'
+    if ($null -ne $families) { $result['families'] = $families }
+    return $result
 }
 
 function Save-UsageSnapshot {
@@ -190,6 +281,7 @@ function Save-UsageSnapshot {
         providers = [ordered]@{
             codex = ConvertTo-ApiProviderUsage $Snapshot.Codex $now
             claude = ConvertTo-ApiProviderUsage $Snapshot.Claude $now
+            antigravity = ConvertTo-ApiProviderUsage (Get-ObjectProperty $Snapshot 'Antigravity') $now
         }
     }
 
