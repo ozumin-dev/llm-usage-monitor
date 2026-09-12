@@ -1,6 +1,6 @@
 ﻿function New-ProviderSettingsGroup {
     # One row per provider: fetch on/off, tray icon, fetch interval.
-    param($Dialog, [string]$Title, [int]$Top, [bool]$Enabled, [bool]$ShowIcon, [int]$Seconds, [int]$MinSeconds)
+    param($Dialog, [string]$Title, [int]$Top, [bool]$Enabled, [bool]$ShowIcon, [int]$Seconds)
     $group = New-Object System.Windows.Forms.GroupBox
     $group.Text = $Title
     $group.Location = New-Object System.Drawing.Point 12, $Top
@@ -23,8 +23,8 @@
     $intervalValue = New-Object System.Windows.Forms.NumericUpDown
     $intervalValue.Location = New-Object System.Drawing.Point 292, 22
     $intervalValue.Size = New-Object System.Drawing.Size 70, 22
-    $intervalValue.Minimum = $MinSeconds; $intervalValue.Maximum = 3600
-    $intervalValue.Value = [Math]::Max($MinSeconds, [Math]::Min(3600, $Seconds))
+    $intervalValue.Minimum = 5; $intervalValue.Maximum = 3600
+    $intervalValue.Value = [Math]::Max(5, [Math]::Min(3600, $Seconds))
     $unit = New-Object System.Windows.Forms.Label
     $unit.Text = '秒'
     $unit.Location = New-Object System.Drawing.Point 366, 25
@@ -58,9 +58,9 @@ function Show-MonitorSettingsDialog {
     $dialog.Font = New-Object System.Drawing.Font 'Segoe UI', 9
     $dialog.Tag = $false
 
-    $codex = New-ProviderSettingsGroup $dialog 'Codex' 12 $settings.CodexEnabled $settings.ShowCodexTrayIcon $settings.CodexRefreshSeconds 60
-    $claude = New-ProviderSettingsGroup $dialog 'Claude' 76 $settings.ClaudeEnabled $settings.ShowClaudeTrayIcon $settings.ClaudeRefreshSeconds 30
-    $antigravity = New-ProviderSettingsGroup $dialog 'Antigravity (agy)' 140 $settings.AntigravityEnabled $settings.ShowAntigravityTrayIcon $settings.AntigravityRefreshSeconds 60
+    $codex = New-ProviderSettingsGroup $dialog 'Codex' 12 $settings.CodexEnabled $settings.ShowCodexTrayIcon $settings.CodexRefreshSeconds
+    $claude = New-ProviderSettingsGroup $dialog 'Claude' 76 $settings.ClaudeEnabled $settings.ShowClaudeTrayIcon $settings.ClaudeRefreshSeconds
+    $antigravity = New-ProviderSettingsGroup $dialog 'Antigravity (agy)' 140 $settings.AntigravityEnabled $settings.ShowAntigravityTrayIcon $settings.AntigravityRefreshSeconds
 
     $generalGroup = New-Object System.Windows.Forms.GroupBox
     $generalGroup.Text = '全般'

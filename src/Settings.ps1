@@ -32,8 +32,7 @@ function Get-MonitorSettings {
         $claudeRefreshValue = [int](Get-SettingProperty $data 'claude_refresh_minutes' 5) * 60
     }
     $claudeRefresh = [int]$claudeRefreshValue
-    # Codex used to be fetched on the local refresh tick (never faster than 60s).
-    $codexRefresh = [int](Get-SettingProperty $data 'codex_refresh_seconds' ([Math]::Max(60, $refresh)))
+    $codexRefresh = [int](Get-SettingProperty $data 'codex_refresh_seconds' 60)
     $antigravityRefresh = [int](Get-SettingProperty $data 'antigravity_refresh_seconds' 300)
     $port = [int](Get-SettingProperty $data 'api_port' 47831)
     return [pscustomobject]@{
@@ -45,10 +44,9 @@ function Get-MonitorSettings {
         ShowAntigravityTrayIcon = [bool](Get-SettingProperty $data 'show_antigravity_tray_icon' $true)
         # Only how often the window re-reads the fetched files; not shown in the dialog.
         LocalRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $refresh))
-        CodexRefreshSeconds = [Math]::Max(60, [Math]::Min(3600, $codexRefresh))
-        # The Claude usage endpoint answers HTTP 429 when polled much faster than this.
-        ClaudeRefreshSeconds = [Math]::Max(30, [Math]::Min(3600, $claudeRefresh))
-        AntigravityRefreshSeconds = [Math]::Max(60, [Math]::Min(3600, $antigravityRefresh))
+        CodexRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $codexRefresh))
+        ClaudeRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $claudeRefresh))
+        AntigravityRefreshSeconds = [Math]::Max(5, [Math]::Min(3600, $antigravityRefresh))
         UsageAlertsEnabled = [bool](Get-SettingProperty $data 'usage_alerts_enabled' $true)
         ApiEnabled = [bool](Get-SettingProperty $data 'api_enabled' $true)
         ApiPort = [Math]::Max(1024, [Math]::Min(65535, $port))
@@ -71,9 +69,9 @@ function Save-MonitorSettings {
         show_claude_tray_icon = [bool]$Settings.ShowClaudeTrayIcon
         show_antigravity_tray_icon = [bool](Get-SettingProperty $Settings 'ShowAntigravityTrayIcon' $true)
         local_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int](Get-SettingProperty $Settings 'LocalRefreshSeconds' 30)))
-        codex_refresh_seconds = [Math]::Max(60, [Math]::Min(3600, [int](Get-SettingProperty $Settings 'CodexRefreshSeconds' 60)))
-        claude_refresh_seconds = [Math]::Max(30, [Math]::Min(3600, [int]$Settings.ClaudeRefreshSeconds))
-        antigravity_refresh_seconds = [Math]::Max(60, [Math]::Min(3600, [int](Get-SettingProperty $Settings 'AntigravityRefreshSeconds' 300)))
+        codex_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int](Get-SettingProperty $Settings 'CodexRefreshSeconds' 60)))
+        claude_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int]$Settings.ClaudeRefreshSeconds))
+        antigravity_refresh_seconds = [Math]::Max(5, [Math]::Min(3600, [int](Get-SettingProperty $Settings 'AntigravityRefreshSeconds' 300)))
         usage_alerts_enabled = [bool]$Settings.UsageAlertsEnabled
         api_enabled = [bool]$Settings.ApiEnabled
         api_port = [Math]::Max(1024, [Math]::Min(65535, [int]$Settings.ApiPort))
