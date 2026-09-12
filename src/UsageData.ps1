@@ -213,10 +213,14 @@ function Get-ClaudeUsage {
 }
 
 function Get-UsageSnapshot {
+    # Providers listed in -Disabled are not read at all (not even the Codex
+    # session-scrape fallback) and are reported as disabled.
+    param([string[]]$Disabled = @())
     [pscustomobject]@{
-        Codex = Get-CodexUsage
-        Claude = Get-ClaudeUsage
-        Antigravity = Get-AntigravityUsage
+        Codex = if ($Disabled -contains 'Codex') { $null } else { Get-CodexUsage }
+        Claude = if ($Disabled -contains 'Claude') { $null } else { Get-ClaudeUsage }
+        Antigravity = if ($Disabled -contains 'Antigravity') { $null } else { Get-AntigravityUsage }
+        Disabled = @($Disabled)
         ReadAt = [DateTimeOffset]::Now
     }
 }
@@ -239,7 +243,10 @@ function ConvertTo-ApiUsageWindow {
 }
 
 function ConvertTo-ApiProviderUsage {
-    param($Usage, [DateTimeOffset]$Now = [DateTimeOffset]::Now)
+    param($Usage, [DateTimeOffset]$Now = [DateTimeOffset]::Now, [switch]$Disabled)
+    if ($Disabled) {
+        return [ordered]@{ available = $false; disabled = $true }
+    }
     if ($null -eq $Usage) {
         return [ordered]@{ available = $false }
     }
@@ -275,13 +282,14 @@ function Save-UsageSnapshot {
     if ($null -eq $Snapshot) { return }
 
     $now = [DateTimeOffset]::Now
+    $disabled = @(Get-ObjectProperty $Snapshot 'Disabled')
     $result = [ordered]@{
         schema_version = 1
         observed_at = $now.ToString('o')
         providers = [ordered]@{
-            codex = ConvertTo-ApiProviderUsage $Snapshot.Codex $now
-            claude = ConvertTo-ApiProviderUsage $Snapshot.Claude $now
-            antigravity = ConvertTo-ApiProviderUsage (Get-ObjectProperty $Snapshot 'Antigravity') $now
+            codex = ConvertTo-ApiProviderUsage $Snapshot.Codex $now -Disabled:($disabled -contains 'Codex')
+            claude = ConvertTo-ApiProviderUsage $Snapshot.Claude $now -Disabled:($disabled -contains 'Claude')
+            antigravity = ConvertTo-ApiProviderUsage (Get-ObjectProperty $Snapshot 'Antigravity') $now -Disabled:($disabled -contains 'Antigravity')
         }
     }
 

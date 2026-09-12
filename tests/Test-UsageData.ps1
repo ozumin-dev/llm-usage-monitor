@@ -72,6 +72,17 @@ try {
     Assert-Equal 2 $apiData.providers.codex.reset_credits.available_count 'API Codex reset credits'
     Assert-Equal 21 $apiData.providers.antigravity.five_hour.used_percent 'API Antigravity 5h percent'
     Assert-Equal 'Claude and GPT models' $apiData.providers.antigravity.families.claude_gpt.label 'API Antigravity families'
+
+    # A provider switched off in the settings is not read and is reported as disabled.
+    $offSnapshot = Get-UsageSnapshot -Disabled @('Codex', 'Antigravity')
+    Assert-Equal $null $offSnapshot.Codex 'Disabled Codex is not read'
+    Assert-Equal $null $offSnapshot.Antigravity 'Disabled Antigravity is not read'
+    Save-UsageSnapshot -Snapshot $offSnapshot -Path $snapshotPath
+    $apiData = Get-Content -Raw -LiteralPath $snapshotPath | ConvertFrom-Json
+    Assert-Equal $false $apiData.providers.codex.available 'API disabled Codex availability'
+    Assert-Equal $true $apiData.providers.codex.disabled 'API disabled Codex flag'
+    Assert-Equal $true $apiData.providers.antigravity.disabled 'API disabled Antigravity flag'
+    Assert-Equal $null $apiData.providers.claude.PSObject.Properties['disabled'] 'API enabled provider has no disabled flag'
 } finally {
     if (Test-Path -LiteralPath $snapshotPath) { Remove-Item -LiteralPath $snapshotPath -Force }
 }

@@ -15,6 +15,11 @@ try {
     Assert-Equal $true $defaults.ShowAntigravityTrayIcon 'Default Antigravity icon'
     Assert-Equal 30 $defaults.LocalRefreshSeconds 'Default local refresh'
     Assert-Equal 300 $defaults.ClaudeRefreshSeconds 'Default Claude refresh'
+    Assert-Equal 60 $defaults.CodexRefreshSeconds 'Default Codex refresh'
+    Assert-Equal 300 $defaults.AntigravityRefreshSeconds 'Default Antigravity refresh'
+    Assert-Equal $true $defaults.CodexEnabled 'Default Codex fetch'
+    Assert-Equal $true $defaults.ClaudeEnabled 'Default Claude fetch'
+    Assert-Equal $true $defaults.AntigravityEnabled 'Default Antigravity fetch'
     Assert-Equal $true $defaults.UsageAlertsEnabled 'Default usage alerts state'
     Assert-Equal $true $defaults.ApiEnabled 'Default API state'
     Assert-Equal 47831 $defaults.ApiPort 'Default API port'
@@ -41,10 +46,30 @@ try {
     $changed | Add-Member -NotePropertyName ShowAntigravityTrayIcon -NotePropertyValue $false
     Save-MonitorSettings -Settings $changed -Path $path
     Assert-Equal $false (Get-MonitorSettings -Path $path).ShowAntigravityTrayIcon 'Saved Antigravity icon'
+    Assert-Equal $true (Get-MonitorSettings -Path $path).CodexEnabled 'Fetch defaults on when the caller omits it'
+
+    $perProvider = [pscustomobject]@{
+        CodexEnabled = $false; ClaudeEnabled = $true; AntigravityEnabled = $false
+        ShowCodexTrayIcon = $true; ShowClaudeTrayIcon = $true; ShowAntigravityTrayIcon = $true
+        CodexRefreshSeconds = 120; ClaudeRefreshSeconds = 10; AntigravityRefreshSeconds = 600
+        UsageAlertsEnabled = $true; ApiEnabled = $true; ApiPort = 47831
+    }
+    Save-MonitorSettings -Settings $perProvider -Path $path
+    $loaded = Get-MonitorSettings -Path $path
+    Assert-Equal $false $loaded.CodexEnabled 'Saved Codex fetch off'
+    Assert-Equal $false $loaded.AntigravityEnabled 'Saved Antigravity fetch off'
+    Assert-Equal 120 $loaded.CodexRefreshSeconds 'Saved Codex refresh'
+    Assert-Equal 30 $loaded.ClaudeRefreshSeconds 'Claude refresh clamps to 30s (the usage endpoint answers 429 faster)'
+    Assert-Equal 600 $loaded.AntigravityRefreshSeconds 'Saved Antigravity refresh'
+    Assert-Equal 30 $loaded.LocalRefreshSeconds 'Local refresh defaults when the caller omits it'
 
     [System.IO.File]::WriteAllText($legacyPath, '{"claude_refresh_minutes":7}', (New-Object System.Text.UTF8Encoding($false)))
     $migrated = Get-MonitorSettings -Path $legacyPath
     Assert-Equal 420 $migrated.ClaudeRefreshSeconds 'Legacy Claude refresh migration'
+
+    # Codex used to follow local_refresh_seconds (never faster than 60s).
+    [System.IO.File]::WriteAllText($legacyPath, '{"local_refresh_seconds":90}', (New-Object System.Text.UTF8Encoding($false)))
+    Assert-Equal 90 (Get-MonitorSettings -Path $legacyPath).CodexRefreshSeconds 'Legacy Codex refresh migration'
 } finally {
     if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
     if (Test-Path -LiteralPath $legacyPath) { Remove-Item -LiteralPath $legacyPath -Force }

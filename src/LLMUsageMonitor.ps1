@@ -24,12 +24,16 @@ $monitorSettings = Get-MonitorSettings
 if (-not $PSBoundParameters.ContainsKey('RefreshSeconds')) { $RefreshSeconds = $monitorSettings.LocalRefreshSeconds }
 if (-not $PSBoundParameters.ContainsKey('ApiPort')) { $ApiPort = $monitorSettings.ApiPort }
 if (-not $PSBoundParameters.ContainsKey('DisableApi')) { $DisableApi = -not $monitorSettings.ApiEnabled }
-$showCodexTrayIcon = $monitorSettings.ShowCodexTrayIcon
-$showClaudeTrayIcon = $monitorSettings.ShowClaudeTrayIcon
-$showAntigravityTrayIcon = $monitorSettings.ShowAntigravityTrayIcon
-$antigravityPollSeconds = 300
-$claudeRefreshSeconds = $monitorSettings.ClaudeRefreshSeconds
 $usageAlertsEnabled = $monitorSettings.UsageAlertsEnabled
+# Per provider: whether to fetch at all, the fetch interval and the helper that
+# writes ~/.ai-usage/<provider>-usage.json. A disabled provider is neither
+# fetched nor read, and its tray icon stays hidden.
+$providerConfig = [ordered]@{
+    Codex = @{ Enabled = $monitorSettings.CodexEnabled; Seconds = $monitorSettings.CodexRefreshSeconds; Helper = 'codex-usage.py'; ShowIcon = $monitorSettings.ShowCodexTrayIcon }
+    Claude = @{ Enabled = $monitorSettings.ClaudeEnabled; Seconds = $monitorSettings.ClaudeRefreshSeconds; Helper = 'claude-desktop-usage.py'; ShowIcon = $monitorSettings.ShowClaudeTrayIcon }
+    Antigravity = @{ Enabled = $monitorSettings.AntigravityEnabled; Seconds = $monitorSettings.AntigravityRefreshSeconds; Helper = 'agy-usage.py'; ShowIcon = $monitorSettings.ShowAntigravityTrayIcon }
+}
+$disabledProviders = @($providerConfig.Keys | Where-Object { -not $providerConfig[$_].Enabled })
 
 $createdNew = $false
 $mutex = New-Object System.Threading.Mutex($true, 'Local\LLMUsageMonitor', [ref]$createdNew)
@@ -42,16 +46,13 @@ $script:snapshot = $null
 $script:iconSignatures = @{}
 $script:allowExit = $false
 $script:lastAlertBands = @{}
-$script:lastClaudeDesktopPoll = [DateTimeOffset]::MinValue
-$script:claudeUpdateProcess = $null
-$script:lastCodexPoll = [DateTimeOffset]::MinValue
-$script:codexUpdateProcess = $null
-$script:lastAntigravityPoll = [DateTimeOffset]::MinValue
-$script:antigravityUpdateProcess = $null
+$script:nextFetchAt = @{}
+$script:helperProcesses = @{}
+foreach ($name in $providerConfig.Keys) { $script:nextFetchAt[$name] = [DateTimeOffset]::Now; $script:helperProcesses[$name] = $null }
+# The window re-reads the fetched files on this cadence and whenever a helper finishes.
+$script:nextSnapshotAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
 $script:apiProcess = $null
 $script:restartRequested = $false
-$script:nextLocalRefreshAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
-$script:nextClaudeRefreshAt = [DateTimeOffset]::Now.AddSeconds($claudeRefreshSeconds)
 $startupPath = Get-StartupShortcutPath
 $thisScript = $MyInvocation.MyCommand.Path
 
@@ -128,32 +129,37 @@ function Format-ResetCreditsDetail {
     return ('リセットクレジット {0}枚  期限 {1} (最短あと{2}日)' -f $available.Count, ($dates -join ', '), $soonestDays)
 }
 
+function Format-NextFetch {
+    # '42s' until the next fetch, '取得中' while the helper runs, 'オフ' when disabled.
+    param([string]$Provider)
+    if (-not $providerConfig[$Provider].Enabled) { return 'オフ' }
+    $process = $script:helperProcesses[$Provider]
+    if ($null -ne $process -and -not $process.HasExited) { return '取得中' }
+    return ('{0}s' -f (Get-NextUpdateSeconds $script:nextFetchAt[$Provider]))
+}
+
 function Update-CountdownDisplay {
-    $codexSeconds = Get-NextUpdateSeconds $script:nextLocalRefreshAt
-    $claudeSeconds = Get-NextUpdateSeconds $script:nextClaudeRefreshAt
-    $antigravitySeconds = Get-NextUpdateSeconds $script:lastAntigravityPoll.AddSeconds($antigravityPollSeconds)
-    $codexSummary = Get-ProviderSummary $script:snapshot.Codex
-    $claudeSummary = Get-ProviderSummary $script:snapshot.Claude
-    $antigravitySummary = Get-ProviderSummary $script:snapshot.Antigravity
-    $codexCredits = Format-ResetCreditsShort $script:snapshot.Codex
-
-    if ($codexNotifyIcon.Visible) { Set-ProviderTrayIcon 'Codex' $script:snapshot.Codex $codexNotifyIcon }
-    if ($claudeNotifyIcon.Visible) { Set-ProviderTrayIcon 'Claude' $script:snapshot.Claude $claudeNotifyIcon }
-    if ($antigravityNotifyIcon.Visible) { Set-ProviderTrayIcon 'Antigravity' $script:snapshot.Antigravity $antigravityNotifyIcon }
-
-    $codexTooltip = 'Codex | {0}{1} | 次回 {2}s' -f $codexSummary, $codexCredits, $codexSeconds
-    $claudeTooltip = 'Claude | {0} | 次回 {1}s' -f $claudeSummary, $claudeSeconds
-    $antigravityTooltip = 'Antigravity | {0} | 次回 {1}s' -f $antigravitySummary, $antigravitySeconds
-    if ($codexTooltip.Length -gt 63) { $codexTooltip = $codexTooltip.Substring(0, 63) }
-    if ($claudeTooltip.Length -gt 63) { $claudeTooltip = $claudeTooltip.Substring(0, 63) }
-    if ($antigravityTooltip.Length -gt 63) { $antigravityTooltip = $antigravityTooltip.Substring(0, 63) }
-    $codexNotifyIcon.Text = $codexTooltip
-    $claudeNotifyIcon.Text = $claudeTooltip
-    $antigravityNotifyIcon.Text = $antigravityTooltip
-    $codexMenu.Text = 'Codex  {0}{1} | 次回 {2}s' -f $codexSummary, $codexCredits, $codexSeconds
-    $claudeMenu.Text = 'Claude  {0} | 次回 {1}s' -f $claudeSummary, $claudeSeconds
-    $antigravityMenu.Text = 'Antigravity  {0} | 次回 {1}s' -f $antigravitySummary, $antigravitySeconds
-    $updatedLabel.Text = '次回 Codex {0}s / Claude {1}s / agy {2}s' -f $codexSeconds, $claudeSeconds, $antigravitySeconds
+    $trays = @(
+        @{ Name = 'Codex'; Icon = $codexNotifyIcon; Menu = $codexMenu },
+        @{ Name = 'Claude'; Icon = $claudeNotifyIcon; Menu = $claudeMenu },
+        @{ Name = 'Antigravity'; Icon = $antigravityNotifyIcon; Menu = $antigravityMenu }
+    )
+    foreach ($tray in $trays) {
+        $usage = Get-ObjectProperty $script:snapshot $tray.Name
+        $next = Format-NextFetch $tray.Name
+        if (-not $providerConfig[$tray.Name].Enabled) {
+            $line = '取得オフ'
+        } else {
+            $extra = if ($tray.Name -eq 'Codex') { Format-ResetCreditsShort $usage } else { '' }
+            $line = '{0}{1} | 次回 {2}' -f (Get-ProviderSummary $usage), $extra, $next
+        }
+        if ($tray.Icon.Visible) { Set-ProviderTrayIcon $tray.Name $usage $tray.Icon }
+        $tooltip = '{0} | {1}' -f $tray.Name, $line
+        if ($tooltip.Length -gt 63) { $tooltip = $tooltip.Substring(0, 63) }
+        $tray.Icon.Text = $tooltip
+        $tray.Menu.Text = '{0}  {1}' -f $tray.Name, $line
+    }
+    $updatedLabel.Text = '次回取得 Codex {0} / Claude {1} / agy {2}' -f (Format-NextFetch 'Codex'), (Format-NextFetch 'Claude'), (Format-NextFetch 'Antigravity')
 }
 
 function Write-ClaudeDesktopUsageLog {
@@ -168,69 +174,64 @@ function Write-ClaudeDesktopUsageLog {
     }
 }
 
-function Start-ClaudeDesktopUsageUpdate {
-    if ($SmokeTest) { return }
-    if ($null -ne $script:claudeUpdateProcess -and -not $script:claudeUpdateProcess.HasExited) { return }
-    $now = [DateTimeOffset]::Now
-    if (($now - $script:lastClaudeDesktopPoll).TotalSeconds -lt $claudeRefreshSeconds) { return }
-    $script:lastClaudeDesktopPoll = $now
-
-    $helper = Join-Path $PSScriptRoot 'claude-desktop-usage.py'
-    if (-not (Test-Path -LiteralPath $helper)) {
-        Write-ClaudeDesktopUsageLog ('helper not found: {0}' -f $helper)
-        return
-    }
-    $python = Get-Command pythonw.exe -ErrorAction SilentlyContinue
-    if ($null -eq $python) { $python = Get-Command python.exe -ErrorAction SilentlyContinue }
-    if ($null -eq $python) {
-        Write-ClaudeDesktopUsageLog 'python.exe/pythonw.exe not found'
-        return
-    }
-
-    $dataDirectory = Join-Path $HOME '.ai-usage'
-    New-Item -ItemType Directory -Force -Path $dataDirectory | Out-Null
-    $logPath = Join-Path $dataDirectory 'claude-desktop-usage.log'
-    $arguments = '"{0}" --log "{1}"' -f $helper, $logPath
-    $script:claudeUpdateProcess = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
-}
-
 function Get-MonitorPython {
     $python = Get-Command pythonw.exe -ErrorAction SilentlyContinue
     if ($null -eq $python) { $python = Get-Command python.exe -ErrorAction SilentlyContinue }
     return $python
 }
 
-function Start-CodexUsageUpdate {
-    # Refresh ~/.ai-usage/codex-usage.json from the official app-server rate
-    # limits. Metadata read (no model tokens); throttled to avoid spawning the
-    # app-server too often.
-    if ($SmokeTest) { return }
-    if ($null -ne $script:codexUpdateProcess -and -not $script:codexUpdateProcess.HasExited) { return }
-    $now = [DateTimeOffset]::Now
-    if (($now - $script:lastCodexPoll).TotalSeconds -lt [Math]::Max(60, $RefreshSeconds)) { return }
-    $script:lastCodexPoll = $now
-
-    $helper = Join-Path $PSScriptRoot 'codex-usage.py'
-    if (-not (Test-Path -LiteralPath $helper)) { return }
+function Start-ProviderFetch {
+    # Spawn the provider's helper. Every helper only reads usage metadata (no
+    # model tokens): Codex app-server rate limits, Claude OAuth usage, `agy /usage`.
+    param([string]$Provider)
+    $helper = Join-Path $PSScriptRoot $providerConfig[$Provider].Helper
+    if (-not (Test-Path -LiteralPath $helper)) {
+        if ($Provider -eq 'Claude') { Write-ClaudeDesktopUsageLog ('helper not found: {0}' -f $helper) }
+        return
+    }
     $python = Get-MonitorPython
-    if ($null -eq $python) { return }
-    $script:codexUpdateProcess = Start-Process -FilePath $python.Source -ArgumentList ('"{0}"' -f $helper) -WindowStyle Hidden -PassThru
+    if ($null -eq $python) {
+        if ($Provider -eq 'Claude') { Write-ClaudeDesktopUsageLog 'python.exe/pythonw.exe not found' }
+        return
+    }
+    $arguments = '"{0}"' -f $helper
+    if ($Provider -eq 'Claude') {
+        $dataDirectory = Join-Path $HOME '.ai-usage'
+        New-Item -ItemType Directory -Force -Path $dataDirectory | Out-Null
+        $arguments += ' --log "{0}"' -f (Join-Path $dataDirectory 'claude-desktop-usage.log')
+    }
+    $script:helperProcesses[$Provider] = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
 }
 
-function Start-AntigravityUsageUpdate {
-    # Refresh ~/.ai-usage/agy-usage.json from `agy /usage`. Heavier to spawn, so
-    # poll every 5 minutes regardless of the local refresh cadence.
-    if ($SmokeTest) { return }
-    if ($null -ne $script:antigravityUpdateProcess -and -not $script:antigravityUpdateProcess.HasExited) { return }
+function Invoke-FetchScheduler {
+    # Called every second: start helpers that are due, and re-read the files
+    # as soon as a helper finishes (or on the regular re-read cadence).
     $now = [DateTimeOffset]::Now
-    if (($now - $script:lastAntigravityPoll).TotalSeconds -lt $antigravityPollSeconds) { return }
-    $script:lastAntigravityPoll = $now
+    $finished = $false
+    foreach ($name in $providerConfig.Keys) {
+        if (-not $providerConfig[$name].Enabled) { continue }
+        $process = $script:helperProcesses[$name]
+        if ($null -ne $process) {
+            if (-not $process.HasExited) { continue }
+            $script:helperProcesses[$name] = $null
+            $finished = $true
+        }
+        if ($SmokeTest) { continue }
+        if ($now -ge $script:nextFetchAt[$name]) {
+            $script:nextFetchAt[$name] = $now.AddSeconds($providerConfig[$name].Seconds)
+            Start-ProviderFetch $name
+        }
+    }
+    if ($finished -or $now -ge $script:nextSnapshotAt) {
+        Update-Snapshot
+    } else {
+        Update-CountdownDisplay
+    }
+}
 
-    $helper = Join-Path $PSScriptRoot 'agy-usage.py'
-    if (-not (Test-Path -LiteralPath $helper)) { return }
-    $python = Get-MonitorPython
-    if ($null -eq $python) { return }
-    $script:antigravityUpdateProcess = Start-Process -FilePath $python.Source -ArgumentList ('"{0}"' -f $helper) -WindowStyle Hidden -PassThru
+function Request-FetchNow {
+    foreach ($name in $providerConfig.Keys) { $script:nextFetchAt[$name] = [DateTimeOffset]::Now }
+    Invoke-FetchScheduler
 }
 
 function Start-UsageApiServer {
@@ -311,7 +312,12 @@ function Set-WindowControls {
 
 function Update-ProviderControls {
     # $Windows lines up with the group's rows; defaults to 5-hour / weekly.
-    param($Controls, $Usage, [object[]]$Windows = $null)
+    param($Controls, $Usage, [object[]]$Windows = $null, [switch]$Disabled)
+    if ($Disabled) {
+        $Controls.Meta.Text = '取得しない設定です(設定画面で変更できます)'
+        foreach ($row in $Controls.Rows) { Set-WindowControls $row.Label $row.Bar $row.Name $null }
+        return
+    }
     if ($null -eq $Usage) {
         $Controls.Meta.Text = 'まだデータがありません'
         foreach ($row in $Controls.Rows) { Set-WindowControls $row.Label $row.Bar $row.Name $null }
@@ -400,14 +406,17 @@ function Check-UsageAlerts {
 }
 
 function Update-Snapshot {
+    $script:nextSnapshotAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
     try {
-        $script:snapshot = Get-UsageSnapshot
+        $script:snapshot = Get-UsageSnapshot -Disabled $disabledProviders
         Save-UsageSnapshot $script:snapshot
-        Update-ProviderControls $codexControls $script:snapshot.Codex
-        $codexControls.Extra.Text = Format-ResetCreditsDetail $script:snapshot.Codex
+        $codexOff = $disabledProviders -contains 'Codex'
+        Update-ProviderControls $codexControls $script:snapshot.Codex -Disabled:$codexOff
+        $codexControls.Extra.Text = if ($codexOff) { '' } else { Format-ResetCreditsDetail $script:snapshot.Codex }
         $claude = $script:snapshot.Claude
-        Update-ProviderControls $claudeControls $claude @($claude.FiveHour, $claude.Weekly, (Get-ObjectProperty $claude 'Fable'))
-        Update-ProviderControls $antigravityControls $script:snapshot.Antigravity (Get-AntigravityWindows $script:snapshot.Antigravity)
+        $claudeWindows = @((Get-ObjectProperty $claude 'FiveHour'), (Get-ObjectProperty $claude 'Weekly'), (Get-ObjectProperty $claude 'Fable'))
+        Update-ProviderControls $claudeControls $claude $claudeWindows -Disabled:($disabledProviders -contains 'Claude')
+        Update-ProviderControls $antigravityControls $script:snapshot.Antigravity (Get-AntigravityWindows $script:snapshot.Antigravity) -Disabled:($disabledProviders -contains 'Antigravity')
         Update-CountdownDisplay
         Check-UsageAlerts $script:snapshot.Codex
         Check-UsageAlerts $script:snapshot.Claude
@@ -480,19 +489,19 @@ $codexNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $codexNotifyIcon.ContextMenuStrip = $menu
 $codexNotifyIcon.Icon = New-MonitorTrayIcon 'Codex' $null $null
 $codexNotifyIcon.Text = 'Codex | 外側 5h ? | 内側 7d ?'
-$codexNotifyIcon.Visible = $showCodexTrayIcon
+$codexNotifyIcon.Visible = $providerConfig.Codex.Enabled -and $providerConfig.Codex.ShowIcon
 
 $claudeNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $claudeNotifyIcon.ContextMenuStrip = $menu
 $claudeNotifyIcon.Icon = New-MonitorTrayIcon 'Claude' $null $null
 $claudeNotifyIcon.Text = 'Claude | 外側 5h ? | 内側 7d ?'
-$claudeNotifyIcon.Visible = $showClaudeTrayIcon
+$claudeNotifyIcon.Visible = $providerConfig.Claude.Enabled -and $providerConfig.Claude.ShowIcon
 
 $antigravityNotifyIcon = New-Object System.Windows.Forms.NotifyIcon
 $antigravityNotifyIcon.ContextMenuStrip = $menu
 $antigravityNotifyIcon.Icon = New-MonitorTrayIcon 'Antigravity' $null $null
 $antigravityNotifyIcon.Text = 'Antigravity | 外側 Gemini 5h ? | 内側 7d ?'
-$antigravityNotifyIcon.Visible = $showAntigravityTrayIcon
+$antigravityNotifyIcon.Visible = $providerConfig.Antigravity.Enabled -and $providerConfig.Antigravity.ShowIcon
 
 $showDetails = {
     Update-Snapshot
@@ -503,7 +512,7 @@ $detailsMenu.Add_Click($showDetails)
 $codexNotifyIcon.Add_MouseClick({ param($sender, $eventArgs); if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $showDetails } })
 $claudeNotifyIcon.Add_MouseClick({ param($sender, $eventArgs); if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $showDetails } })
 $antigravityNotifyIcon.Add_MouseClick({ param($sender, $eventArgs); if ($eventArgs.Button -eq [System.Windows.Forms.MouseButtons]::Left) { & $showDetails } })
-$refreshMenu.Add_Click({ Update-Snapshot })
+$refreshMenu.Add_Click({ Request-FetchNow })
 $startupMenu.Add_Click({ Set-StartupEnabled (-not (Test-Path -LiteralPath $startupPath)); $startupMenu.Checked = Test-Path -LiteralPath $startupPath })
 $openSettings = {
     if (Show-MonitorSettingsDialog -MonitorScript $thisScript) {
@@ -524,44 +533,22 @@ $menu.Add_Opening({ $startupMenu.Checked = Test-Path -LiteralPath $startupPath }
 $exitMenu.Add_Click({ $script:allowExit = $true; $form.Close(); [System.Windows.Forms.Application]::Exit() })
 $form.Add_FormClosing({ param($sender, $eventArgs); if (-not $script:allowExit) { $eventArgs.Cancel = $true; $form.Hide() } })
 
-$timer = New-Object System.Windows.Forms.Timer
-$timer.Interval = [Math]::Max(5, $RefreshSeconds) * 1000
-$timer.Add_Tick({
-    $script:nextLocalRefreshAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
-    Start-CodexUsageUpdate
-    Start-AntigravityUsageUpdate
-    Update-Snapshot
-})
-$timer.Start()
-
-$claudeTimer = New-Object System.Windows.Forms.Timer
-$claudeTimer.Interval = [Math]::Max(5, $claudeRefreshSeconds) * 1000
-$claudeTimer.Add_Tick({
-    $script:nextClaudeRefreshAt = [DateTimeOffset]::Now.AddSeconds($claudeRefreshSeconds)
-    Start-ClaudeDesktopUsageUpdate
-})
-$claudeTimer.Start()
-
-$countdownTimer = New-Object System.Windows.Forms.Timer
-$countdownTimer.Interval = 1000
-$countdownTimer.Add_Tick({ Update-CountdownDisplay })
-$countdownTimer.Start()
+$schedulerTimer = New-Object System.Windows.Forms.Timer
+$schedulerTimer.Interval = 1000
+$schedulerTimer.Add_Tick({ Invoke-FetchScheduler })
+$schedulerTimer.Start()
 
 try {
     Start-UsageApiServer
-    Start-ClaudeDesktopUsageUpdate
-    Start-CodexUsageUpdate
-    Start-AntigravityUsageUpdate
     Update-Snapshot
+    Invoke-FetchScheduler
     if ($SmokeTest) {
         Write-Host 'LLM Usage Monitor smoke test passed.'
     } else {
         [System.Windows.Forms.Application]::Run()
     }
 } finally {
-    $timer.Stop(); $timer.Dispose()
-    $claudeTimer.Stop(); $claudeTimer.Dispose()
-    $countdownTimer.Stop(); $countdownTimer.Dispose()
+    $schedulerTimer.Stop(); $schedulerTimer.Dispose()
     if ($null -ne $script:apiProcess -and -not $script:apiProcess.HasExited) {
         Stop-Process -Id $script:apiProcess.Id -Force -ErrorAction SilentlyContinue
     }
