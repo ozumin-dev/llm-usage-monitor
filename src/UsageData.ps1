@@ -212,17 +212,79 @@ function Get-ClaudeUsage {
     }
 }
 
+function Get-ProviderFetchError {
+    # The helpers leave <output>.error.json while fetching keeps failing and
+    # delete it on the next success, so its presence means "currently failing".
+    param([string]$Path)
+    if (-not (Test-Path -LiteralPath $Path)) { return $null }
+    # The helpers write UTF-8 (hints are Japanese); PowerShell 5.1 would read ANSI.
+    try { $data = Get-Content -Raw -Encoding UTF8 -LiteralPath $Path | ConvertFrom-Json -ErrorAction Stop } catch { return $null }
+    $message = Get-ObjectProperty $data 'message'
+    if (-not $message) { return $null }
+    $since = $null
+    $lastAt = $null
+    try { $since = [DateTimeOffset]::Parse((Get-ObjectProperty $data 'since')) } catch { }
+    try { $lastAt = [DateTimeOffset]::Parse((Get-ObjectProperty $data 'last_at')) } catch { }
+    [pscustomobject]@{
+        Message = [string]$message
+        Hint = Get-ObjectProperty $data 'hint'
+        Since = $since
+        LastAt = $lastAt
+        Count = ConvertTo-NullableInt64 (Get-ObjectProperty $data 'count')
+    }
+}
+
+function New-ProviderFetchError {
+    # Same shape as Get-ProviderFetchError, for failures the monitor sees itself
+    # (helper missing, python missing, helper crashed before writing its file).
+    param([string]$Message, $Previous = $null)
+    $now = [DateTimeOffset]::Now
+    $since = $now
+    $count = 1
+    if ($null -ne $Previous -and $Previous.Message -eq $Message) {
+        if ($null -ne $Previous.Since) { $since = $Previous.Since }
+        if ($null -ne $Previous.Count) { $count = $Previous.Count + 1 }
+    }
+    [pscustomobject]@{ Message = $Message; Hint = $null; Since = $since; LastAt = $now; Count = $count }
+}
+
+$script:ProviderErrorFiles = @{
+    Codex = 'codex-usage.error.json'
+    Claude = 'claude-desktop-usage.error.json'
+    Antigravity = 'agy-usage.error.json'
+}
+
 function Get-UsageSnapshot {
     # Providers listed in -Disabled are not read at all (not even the Codex
-    # session-scrape fallback) and are reported as disabled.
-    param([string[]]$Disabled = @())
+    # session-scrape fallback) and are reported as disabled. -MonitorErrors
+    # holds failures seen by the monitor itself; a helper's error file wins.
+    param(
+        [string[]]$Disabled = @(),
+        [hashtable]$MonitorErrors = @{},
+        [string]$DataDirectory = (Join-Path $HOME '.ai-usage')
+    )
+    $errors = @{}
+    foreach ($name in $script:ProviderErrorFiles.Keys) {
+        if ($Disabled -contains $name) { continue }
+        $fetchError = Get-ProviderFetchError (Join-Path $DataDirectory $script:ProviderErrorFiles[$name])
+        if ($null -eq $fetchError -and $MonitorErrors.ContainsKey($name)) { $fetchError = $MonitorErrors[$name] }
+        if ($null -ne $fetchError) { $errors[$name] = $fetchError }
+    }
     [pscustomobject]@{
         Codex = if ($Disabled -contains 'Codex') { $null } else { Get-CodexUsage }
         Claude = if ($Disabled -contains 'Claude') { $null } else { Get-ClaudeUsage }
         Antigravity = if ($Disabled -contains 'Antigravity') { $null } else { Get-AntigravityUsage }
+        Errors = $errors
         Disabled = @($Disabled)
         ReadAt = [DateTimeOffset]::Now
     }
+}
+
+function Get-SnapshotError {
+    param($Snapshot, [string]$Provider)
+    $errors = Get-ObjectProperty $Snapshot 'Errors'
+    if ($null -eq $errors -or -not $errors.ContainsKey($Provider)) { return $null }
+    return $errors[$Provider]
 }
 
 function ConvertTo-ApiUsageWindow {
@@ -242,13 +304,28 @@ function ConvertTo-ApiUsageWindow {
     }
 }
 
+function ConvertTo-ApiFetchError {
+    param($FetchError)
+    [ordered]@{
+        message = $FetchError.Message
+        hint = $FetchError.Hint
+        since = if ($null -ne $FetchError.Since) { $FetchError.Since.ToString('o') } else { $null }
+        last_at = if ($null -ne $FetchError.LastAt) { $FetchError.LastAt.ToString('o') } else { $null }
+        count = $FetchError.Count
+    }
+}
+
 function ConvertTo-ApiProviderUsage {
-    param($Usage, [DateTimeOffset]$Now = [DateTimeOffset]::Now, [switch]$Disabled)
+    # With -FetchError the provider carries an `error` block; any usage data
+    # alongside it is the last successful fetch (see captured_at).
+    param($Usage, [DateTimeOffset]$Now = [DateTimeOffset]::Now, [switch]$Disabled, $FetchError = $null)
     if ($Disabled) {
         return [ordered]@{ available = $false; disabled = $true }
     }
     if ($null -eq $Usage) {
-        return [ordered]@{ available = $false }
+        $empty = [ordered]@{ available = $false }
+        if ($null -ne $FetchError) { $empty['error'] = ConvertTo-ApiFetchError $FetchError }
+        return $empty
     }
     $result = [ordered]@{
         available = $true
@@ -270,6 +347,7 @@ function ConvertTo-ApiProviderUsage {
     if ($null -ne $credits) { $result['reset_credits'] = $credits }
     $families = Get-ObjectProperty $Usage 'Families'
     if ($null -ne $families) { $result['families'] = $families }
+    if ($null -ne $FetchError) { $result['error'] = ConvertTo-ApiFetchError $FetchError }
     return $result
 }
 
@@ -287,9 +365,9 @@ function Save-UsageSnapshot {
         schema_version = 1
         observed_at = $now.ToString('o')
         providers = [ordered]@{
-            codex = ConvertTo-ApiProviderUsage $Snapshot.Codex $now -Disabled:($disabled -contains 'Codex')
-            claude = ConvertTo-ApiProviderUsage $Snapshot.Claude $now -Disabled:($disabled -contains 'Claude')
-            antigravity = ConvertTo-ApiProviderUsage (Get-ObjectProperty $Snapshot 'Antigravity') $now -Disabled:($disabled -contains 'Antigravity')
+            codex = ConvertTo-ApiProviderUsage $Snapshot.Codex $now -Disabled:($disabled -contains 'Codex') -FetchError (Get-SnapshotError $Snapshot 'Codex')
+            claude = ConvertTo-ApiProviderUsage $Snapshot.Claude $now -Disabled:($disabled -contains 'Claude') -FetchError (Get-SnapshotError $Snapshot 'Claude')
+            antigravity = ConvertTo-ApiProviderUsage (Get-ObjectProperty $Snapshot 'Antigravity') $now -Disabled:($disabled -contains 'Antigravity') -FetchError (Get-SnapshotError $Snapshot 'Antigravity')
         }
     }
 

@@ -1,6 +1,13 @@
+import contextlib
 import importlib.util
+import io
+import json
+import os
 import pathlib
+import sys
+import tempfile
 import unittest
+from unittest import mock
 
 
 ROOT = pathlib.Path(__file__).resolve().parents[1]
@@ -83,6 +90,52 @@ class ClaudeScopedLimitTests(unittest.TestCase):
     def test_missing_scope_yields_empty_window(self):
         window = claude_usage.normalize_scoped_window(claude_usage.find_scoped_limit({"limits": []}, "Fable"))
         self.assertIsNone(window["used_percent"])
+
+
+class FetchErrorFileTests(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.output = os.path.join(self.temp.name, "claude-desktop-usage.json")
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def read_error(self):
+        with open(os.path.join(self.temp.name, "claude-desktop-usage.error.json"), encoding="utf-8") as stream:
+            return json.load(stream)
+
+    def test_consecutive_failures_keep_since_and_count_up(self):
+        for module in (claude_usage, codex_usage, agy_usage):
+            with self.subTest(module=module.__name__):
+                module.record_fetch_error(self.output, "first")
+                first = self.read_error()
+                module.record_fetch_error(self.output, "second", "hint text")
+                second = self.read_error()
+                self.assertEqual(second["count"], 2)
+                self.assertEqual(second["since"], first["since"])
+                self.assertEqual(second["message"], "second")
+                self.assertEqual(second["hint"], "hint text")
+                module.clear_fetch_error(self.output)
+                self.assertFalse(os.path.exists(module.error_path_for(self.output)))
+                module.clear_fetch_error(self.output)  # already gone: no error
+
+    def test_expired_login_gets_a_hint(self):
+        message = 'HTTP 400 from Anthropic: {"error": "invalid_grant", "error_description": "Refresh token expired"}'
+        self.assertIn("claude auth login", claude_usage.login_hint(message))
+        self.assertIsNone(claude_usage.login_hint("HTTP 429 from Anthropic"))
+
+    def test_claude_main_records_and_clears_the_error_file(self):
+        credentials = os.path.join(self.temp.name, "missing-credentials.json")
+        argv = ["claude-desktop-usage.py", "--credentials", credentials, "--output", self.output, "--log", ""]
+        with mock.patch.object(sys, "argv", argv), contextlib.redirect_stderr(io.StringIO()):
+            self.assertEqual(claude_usage.main(), 1)
+        self.assertIn("claude auth login", self.read_error()["hint"])
+
+        with mock.patch.object(sys, "argv", argv), \
+                mock.patch.object(claude_usage, "fetch_usage", return_value={"five_hour": {"utilization": 5}}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(claude_usage.main(), 0)
+        self.assertFalse(os.path.exists(claude_usage.error_path_for(self.output)))
 
 
 if __name__ == "__main__":

@@ -87,4 +87,41 @@ try {
     if (Test-Path -LiteralPath $snapshotPath) { Remove-Item -LiteralPath $snapshotPath -Force }
 }
 
+# Fetch errors: a helper's error file is exposed next to the last good data;
+# the monitor's own error only fills in when there is no file.
+$errorDir = Join-Path $env:TEMP ('llm-usage-errors-{0}' -f $PID)
+New-Item -ItemType Directory -Force -Path $errorDir | Out-Null
+try {
+    # UTF-8 without BOM, as the Python helpers write it.
+    [System.IO.File]::WriteAllText((Join-Path $errorDir 'claude-desktop-usage.error.json'),
+        '{"message":"HTTP 400 invalid_grant","hint":"ログイン切れ","since":"2026-09-16T23:45:58+09:00","last_at":"2026-09-19T04:18:44+09:00","count":4581}',
+        (New-Object System.Text.UTF8Encoding($false)))
+    $monitorErrors = @{
+        Claude = New-ProviderFetchError 'exit code 1'
+        Antigravity = New-ProviderFetchError 'helper missing'
+    }
+    $errorSnapshot = Get-UsageSnapshot -Disabled @('Codex') -MonitorErrors $monitorErrors -DataDirectory $errorDir
+    Assert-Equal 'HTTP 400 invalid_grant' (Get-SnapshotError $errorSnapshot 'Claude').Message 'Error file wins over the monitor error'
+    Assert-Equal 4581 (Get-SnapshotError $errorSnapshot 'Claude').Count 'Error count'
+    Assert-Equal 'helper missing' (Get-SnapshotError $errorSnapshot 'Antigravity').Message 'Monitor error without a file'
+    Assert-Equal $null (Get-SnapshotError $errorSnapshot 'Codex') 'Disabled provider has no error'
+
+    $repeated = New-ProviderFetchError 'helper missing' $monitorErrors.Antigravity
+    Assert-Equal 2 $repeated.Count 'Repeated monitor error counts up'
+    Assert-Equal $monitorErrors.Antigravity.Since $repeated.Since 'Repeated monitor error keeps its start'
+    Assert-Equal 1 (New-ProviderFetchError 'other' $monitorErrors.Antigravity).Count 'A different error starts over'
+
+    $errorSnapshot = [pscustomobject]@{ Codex = $null; Claude = $claudeDesktop; Antigravity = $null; Errors = $errorSnapshot.Errors; ReadAt = [DateTimeOffset]::Now }
+    Save-UsageSnapshot -Snapshot $errorSnapshot -Path (Join-Path $errorDir 'usage.json')
+    $apiData = Get-Content -Raw -Encoding UTF8 -LiteralPath (Join-Path $errorDir 'usage.json') | ConvertFrom-Json
+    Assert-Equal $true $apiData.providers.claude.available 'API keeps the last good Claude data'
+    Assert-Equal 'ログイン切れ' $apiData.providers.claude.error.hint 'API Claude error hint (UTF-8 read)'
+    Assert-Equal 4581 $apiData.providers.claude.error.count 'API Claude error count'
+    Assert-Equal $false $apiData.providers.antigravity.available 'API Antigravity without data'
+    Assert-Equal 'helper missing' $apiData.providers.antigravity.error.message 'API error without data'
+    Assert-Equal $null $apiData.providers.codex.PSObject.Properties['error'] 'API provider without error has no error block'
+} finally {
+    Remove-Item -LiteralPath $errorDir -Recurse -Force
+}
+
 Write-Host 'All UsageData tests passed.' -ForegroundColor Green

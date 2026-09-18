@@ -87,6 +87,47 @@ def atomic_json_write(path: str, value: dict) -> None:
             os.unlink(temporary)
 
 
+def error_path_for(output_path: str) -> str:
+    return os.path.splitext(output_path)[0] + ".error.json"
+
+
+def record_fetch_error(output_path: str, message: str, hint: str | None = None) -> None:
+    """Leave <output>.error.json for the monitor so a failing fetch is shown
+    instead of silently keeping the last good data. `since` and `count` span
+    the current run of consecutive failures."""
+    path = error_path_for(output_path)
+    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    since, count = now, 0
+    try:
+        with open(path, encoding="utf-8") as stream:
+            previous = json.load(stream)
+        since = previous.get("since") or now
+        count = int(previous.get("count") or 0)
+    except (OSError, ValueError, AttributeError):
+        pass
+    value = {"message": message, "since": since, "last_at": now, "count": count + 1}
+    if hint:
+        value["hint"] = hint
+    try:
+        atomic_json_write(path, value)
+    except OSError:
+        pass
+
+
+def clear_fetch_error(output_path: str) -> None:
+    try:
+        os.unlink(error_path_for(output_path))
+    except OSError:
+        pass
+
+
+def login_hint(message: str) -> str | None:
+    if "invalid_grant" in message or "not signed in" in message or "credentials are unavailable" in message \
+            or "Could not read Claude credentials" in message:
+        return "ログイン切れです｡ターミナルで claude auth login を実行してください"
+    return None
+
+
 def refresh_access_token(root: dict, credential_path: str) -> str:
     oauth = root.get("claudeAiOauth")
     if not isinstance(oauth, dict) or not oauth.get("refreshToken"):
@@ -235,16 +276,19 @@ def main() -> int:
             "captured_at": datetime.now(timezone.utc).astimezone().isoformat(),
         }
         atomic_json_write(os.path.abspath(args.output), result)
+        clear_fetch_error(os.path.abspath(args.output))
         five = result["five_hour"]["used_percent"]
         week = result["weekly"]["used_percent"]
         fable = result["fable"]["used_percent"]
         print(f"Claude usage updated: 5h={five}% 7d={week}% fable={fable}%")
         append_log(args.log, f"updated 5h={five}% 7d={week}% fable={fable}%")
         return 0
-    except UsageError as exc:
-        message = f"Claude usage update failed: {exc}"
+    except Exception as exc:  # noqa: BLE001 - every failure must reach the monitor
+        detail = str(exc) if isinstance(exc, UsageError) else f"{type(exc).__name__}: {exc}"
+        message = f"Claude usage update failed: {detail}"
         print(message, file=sys.stderr)
         append_log(args.log, message)
+        record_fetch_error(os.path.abspath(args.output), detail, login_hint(detail))
         return 1
 
 

@@ -48,6 +48,9 @@ $script:allowExit = $false
 $script:lastAlertBands = @{}
 $script:nextFetchAt = @{}
 $script:helperProcesses = @{}
+# Failures the monitor sees itself; the helpers' own error files take precedence.
+$script:monitorErrors = @{}
+$script:notifiedErrors = @{}
 foreach ($name in $providerConfig.Keys) { $script:nextFetchAt[$name] = [DateTimeOffset]::Now; $script:helperProcesses[$name] = $null }
 # The window re-reads the fetched files on this cadence and whenever a helper finishes.
 $script:nextSnapshotAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
@@ -152,6 +155,8 @@ function Update-CountdownDisplay {
         } else {
             $extra = if ($tray.Name -eq 'Codex') { Format-ResetCreditsShort $usage } else { '' }
             $line = '{0}{1} | 次回 {2}' -f (Get-ProviderSummary $usage), $extra, $next
+            # Leads the line so the 63-char tooltip limit never cuts it off.
+            if ($null -ne (Get-SnapshotError $script:snapshot $tray.Name)) { $line = '[取得エラー] ' + $line }
         }
         if ($tray.Icon.Visible) { Set-ProviderTrayIcon $tray.Name $usage $tray.Icon }
         $tooltip = '{0} | {1}' -f $tray.Name, $line
@@ -187,11 +192,13 @@ function Start-ProviderFetch {
     $helper = Join-Path $PSScriptRoot $providerConfig[$Provider].Helper
     if (-not (Test-Path -LiteralPath $helper)) {
         if ($Provider -eq 'Claude') { Write-ClaudeDesktopUsageLog ('helper not found: {0}' -f $helper) }
+        Set-MonitorError $Provider ('取得プログラムが見つかりません: {0}' -f $helper)
         return
     }
     $python = Get-MonitorPython
     if ($null -eq $python) {
         if ($Provider -eq 'Claude') { Write-ClaudeDesktopUsageLog 'python.exe/pythonw.exe not found' }
+        Set-MonitorError $Provider 'python.exe / pythonw.exe が見つかりません'
         return
     }
     $arguments = '"{0}"' -f $helper
@@ -200,7 +207,28 @@ function Start-ProviderFetch {
         New-Item -ItemType Directory -Force -Path $dataDirectory | Out-Null
         $arguments += ' --log "{0}"' -f (Join-Path $dataDirectory 'claude-desktop-usage.log')
     }
-    $script:helperProcesses[$Provider] = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    $process = Start-Process -FilePath $python.Source -ArgumentList $arguments -WindowStyle Hidden -PassThru
+    # Touch the handle now; otherwise ExitCode can read as null after the exit.
+    $null = $process.Handle
+    $script:helperProcesses[$Provider] = $process
+}
+
+function Set-MonitorError {
+    param([string]$Provider, [string]$Message)
+    $script:monitorErrors[$Provider] = New-ProviderFetchError $Message $script:monitorErrors[$Provider]
+}
+
+function Receive-HelperExit {
+    # A helper that exits non-zero normally explains itself in its error file;
+    # this entry only shows when it died before writing one.
+    param([string]$Provider, $Process)
+    $code = $Process.ExitCode
+    if ($null -eq $code) { return }
+    if ($code -eq 0) {
+        $script:monitorErrors.Remove($Provider)
+    } else {
+        Set-MonitorError $Provider ('取得プログラムが終了コード {0} で終了しました' -f $code)
+    }
 }
 
 function Invoke-FetchScheduler {
@@ -213,6 +241,7 @@ function Invoke-FetchScheduler {
         $process = $script:helperProcesses[$name]
         if ($null -ne $process) {
             if (-not $process.HasExited) { continue }
+            Receive-HelperExit $name $process
             $script:helperProcesses[$name] = $null
             $finished = $true
         }
@@ -288,10 +317,87 @@ function New-UsageGroup {
         $rowTop += 45
     }
 
-    $group.Size = New-Object System.Drawing.Size 496, ($rowTop + 11)
+    # Fetch error box: hidden while fetching works, otherwise the group grows
+    # to show it and the groups below move down (Update-FormLayout).
+    $errorBox = New-Object System.Windows.Forms.Label
+    $errorBox.Location = New-Object System.Drawing.Point 14, ($rowTop + 4)
+    $errorBox.Size = New-Object System.Drawing.Size 462, 48
+    $errorBox.BorderStyle = [System.Windows.Forms.BorderStyle]::FixedSingle
+    $errorBox.BackColor = [System.Drawing.Color]::FromArgb(255, 235, 235)
+    $errorBox.ForeColor = [System.Drawing.Color]::FromArgb(160, 20, 20)
+    $errorBox.Padding = New-Object System.Windows.Forms.Padding 4, 3, 4, 3
+    $errorBox.AutoEllipsis = $true
+    $errorBox.Visible = $false
+    $controls += $errorBox
+
+    $baseHeight = $rowTop + 11
+    $group.Size = New-Object System.Drawing.Size 496, $baseHeight
     $group.Controls.AddRange($controls)
     $form.Controls.Add($group)
-    return @{ Group = $group; Meta = $meta; Extra = $extra; Rows = $rows }
+    return @{ Group = $group; Meta = $meta; Extra = $extra; Rows = $rows; ErrorBox = $errorBox; BaseHeight = $baseHeight }
+}
+
+function Format-FetchErrorSummary {
+    # One line for tooltips, menus and balloons.
+    param($FetchError)
+    if ($null -ne $FetchError.Hint -and "$($FetchError.Hint)" -ne '') { return [string]$FetchError.Hint }
+    return [string]$FetchError.Message
+}
+
+function Set-ProviderErrorBox {
+    param($Controls, $FetchError)
+    $box = $Controls.ErrorBox
+    if ($null -eq $FetchError) {
+        $box.Visible = $false
+        $errorToolTip.SetToolTip($box, $null)
+        $Controls.Group.Height = $Controls.BaseHeight
+        return
+    }
+    $when = @()
+    if ($null -ne $FetchError.Since) { $when += ('{0} から失敗中' -f $FetchError.Since.ToLocalTime().ToString('M/d H:mm')) }
+    if ($null -ne $FetchError.Count) { $when += ('{0:N0}回' -f $FetchError.Count) }
+    $heading = '取得エラー'
+    if ($when.Count -gt 0) { $heading += ' (' + ($when -join ', ') + ')' }
+    $heading += ' 表示中の値は最後に取れたものです'
+    $box.Text = $heading + [Environment]::NewLine + (Format-FetchErrorSummary $FetchError)
+    $detail = [string]$FetchError.Message
+    if ($null -ne $FetchError.LastAt) { $detail += [Environment]::NewLine + ('最終試行 {0}' -f $FetchError.LastAt.ToLocalTime().ToString('M/d H:mm:ss')) }
+    $errorToolTip.SetToolTip($box, $detail)
+    $box.Visible = $true
+    $Controls.Group.Height = $Controls.BaseHeight + $box.Height + 4
+}
+
+function Update-FormLayout {
+    # Stack the provider groups and move the footer under them.
+    $top = 42
+    foreach ($controls in @($codexControls, $claudeControls, $antigravityControls)) {
+        $controls.Group.Top = $top
+        $top = $controls.Group.Bottom + 8
+    }
+    $contentBottom = $antigravityControls.Group.Bottom
+    $hint.Top = $contentBottom + 21
+    $settingsButton.Top = $contentBottom + 15
+    $form.ClientSize = New-Object System.Drawing.Size 520, ($contentBottom + 58)
+}
+
+function Show-FetchErrorNotifications {
+    # One balloon when a provider starts failing (keyed by the failure's start
+    # time), so a broken fetch never goes unnoticed; nothing more until it recovers.
+    foreach ($name in @('Codex', 'Claude', 'Antigravity')) {
+        $fetchError = Get-SnapshotError $script:snapshot $name
+        if ($null -eq $fetchError) { $script:notifiedErrors.Remove($name); continue }
+        $key = if ($null -ne $fetchError.Since) { $fetchError.Since.ToString('o') } else { $fetchError.Message }
+        if ($script:notifiedErrors[$name] -eq $key) { continue }
+        $script:notifiedErrors[$name] = $key
+        $targetIcon = switch ($name) { 'Codex' { $codexNotifyIcon } 'Antigravity' { $antigravityNotifyIcon } default { $claudeNotifyIcon } }
+        if (-not $targetIcon.Visible) { continue }
+        $text = Format-FetchErrorSummary $fetchError
+        if ($text.Length -gt 200) { $text = $text.Substring(0, 197) + '...' }
+        $targetIcon.BalloonTipTitle = '{0} の利用状況を取得できません' -f $name
+        $targetIcon.BalloonTipText = $text
+        $targetIcon.BalloonTipIcon = [System.Windows.Forms.ToolTipIcon]::Error
+        $targetIcon.ShowBalloonTip(8000)
+    }
 }
 
 function Set-WindowControls {
@@ -408,7 +514,7 @@ function Check-UsageAlerts {
 function Update-Snapshot {
     $script:nextSnapshotAt = [DateTimeOffset]::Now.AddSeconds($RefreshSeconds)
     try {
-        $script:snapshot = Get-UsageSnapshot -Disabled $disabledProviders
+        $script:snapshot = Get-UsageSnapshot -Disabled $disabledProviders -MonitorErrors $script:monitorErrors
         Save-UsageSnapshot $script:snapshot
         $codexOff = $disabledProviders -contains 'Codex'
         Update-ProviderControls $codexControls $script:snapshot.Codex -Disabled:$codexOff
@@ -417,6 +523,11 @@ function Update-Snapshot {
         $claudeWindows = @((Get-ObjectProperty $claude 'FiveHour'), (Get-ObjectProperty $claude 'Weekly'), (Get-ObjectProperty $claude 'Fable'))
         Update-ProviderControls $claudeControls $claude $claudeWindows -Disabled:($disabledProviders -contains 'Claude')
         Update-ProviderControls $antigravityControls $script:snapshot.Antigravity (Get-AntigravityWindows $script:snapshot.Antigravity) -Disabled:($disabledProviders -contains 'Antigravity')
+        Set-ProviderErrorBox $codexControls (Get-SnapshotError $script:snapshot 'Codex')
+        Set-ProviderErrorBox $claudeControls (Get-SnapshotError $script:snapshot 'Claude')
+        Set-ProviderErrorBox $antigravityControls (Get-SnapshotError $script:snapshot 'Antigravity')
+        Update-FormLayout
+        Show-FetchErrorNotifications
         Update-CountdownDisplay
         Check-UsageAlerts $script:snapshot.Codex
         Check-UsageAlerts $script:snapshot.Claude
@@ -448,6 +559,9 @@ $updatedLabel.Location = New-Object System.Drawing.Point 150, 13
 $updatedLabel.Size = New-Object System.Drawing.Size 357, 20
 $updatedLabel.ForeColor = [System.Drawing.Color]::DimGray
 $form.Controls.Add($updatedLabel)
+
+$errorToolTip = New-Object System.Windows.Forms.ToolTip
+$errorToolTip.AutoPopDelay = 30000
 
 $codexControls = New-UsageGroup 'Codex' 42 -WithExtraLine
 $claudeControls = New-UsageGroup 'Claude Code' ($codexControls.Group.Bottom + 8) -RowNames @('5時間', '週間', 'Fable 週間')

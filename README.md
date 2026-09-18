@@ -38,6 +38,7 @@ AntigravityのアイコンはGemini枠を表示します｡Claude/GPT枠は詳�
 - Codexのリセットクレジット(枚数と各期限)の表示と､一覧･消費用のコマンドラインツール
 - Antigravityの2系統(Gemini枠とClaude/GPT枠)の表示
 - 80%･95%を跨いだときだけ通知(起動直後は通知しません｡ClaudeはFable上限､AntigravityはGemini枠が対象)
+- 取得に失敗し続けている間は､詳細ウィンドウの該当欄に赤いエラー枠(いつから何回失敗しているかと原因)を表示し､トレイのツールチップにも `[取得エラー]` を付けます｡失敗が始まったときに1回だけ通知します｡次に取得できた時点で自動的に消えます
 - サービスごとの取得のオン･オフと取得間隔(既定はCodex 60秒､Claude 5分､Antigravity 5分)
 - Windowsログイン時の自動起動
 - ローカルの読み取り専用JSON API
@@ -191,6 +192,7 @@ Invoke-RestMethod http://127.0.0.1:47831/api/v1/usage
 | `claude.fable` | Fableの週次上限｡`five_hour` などと同じ形(`used_percent`･`left_percent`･`resets_at`･`expired`) |
 | `codex.reset_credits` | `available_count` と､各クレジットの `id`･`status`･`title`･`expires_at_epoch` など |
 | `antigravity.families` | `gemini` と `claude_gpt` の2系統｡それぞれに `five_hour` と `weekly`｡`antigravity` 直下の2枠はGemini枠と同じ値 |
+| `<各プロバイダー>.error` | 取得に失敗し続けている間だけ出ます｡`message`(原因)･`hint`(対処｡分かる場合のみ)･`since`(連続失敗の開始時刻)･`last_at`(最後の試行)･`count`(連続失敗回数)｡このとき一緒に返る使用率は最後に取得できた値で､`captured_at` がその時刻です |
 
 レスポンスの抜粋:
 

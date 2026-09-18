@@ -177,6 +177,40 @@ def atomic_json_write(path: str, value: dict) -> None:
             os.unlink(temporary)
 
 
+def error_path_for(output_path: str) -> str:
+    return os.path.splitext(output_path)[0] + ".error.json"
+
+
+def record_fetch_error(output_path: str, message: str, hint: str | None = None) -> None:
+    """Leave <output>.error.json for the monitor so a failing fetch is shown
+    instead of silently keeping the last good data. `since` and `count` span
+    the current run of consecutive failures."""
+    path = error_path_for(output_path)
+    now = datetime.now(timezone.utc).astimezone().isoformat(timespec="seconds")
+    since, count = now, 0
+    try:
+        with open(path, encoding="utf-8") as stream:
+            previous = json.load(stream)
+        since = previous.get("since") or now
+        count = int(previous.get("count") or 0)
+    except (OSError, ValueError, AttributeError):
+        pass
+    value = {"message": message, "since": since, "last_at": now, "count": count + 1}
+    if hint:
+        value["hint"] = hint
+    try:
+        atomic_json_write(path, value)
+    except OSError:
+        pass
+
+
+def clear_fetch_error(output_path: str) -> None:
+    try:
+        os.unlink(error_path_for(output_path))
+    except OSError:
+        pass
+
+
 def main() -> int:
     default_output = os.path.join(os.path.expanduser("~"), ".ai-usage", "codex-usage.json")
     parser = argparse.ArgumentParser(description="Fetch Codex rate limits via app-server")
@@ -188,8 +222,11 @@ def main() -> int:
 
     try:
         normalized = normalize(read_rate_limits(args.command, args.timeout))
-    except RpcError as exc:
-        print(f"Codex usage update failed: {exc}", file=sys.stderr)
+    except Exception as exc:  # noqa: BLE001 - every failure must reach the monitor
+        detail = str(exc) if isinstance(exc, RpcError) else f"{type(exc).__name__}: {exc}"
+        print(f"Codex usage update failed: {detail}", file=sys.stderr)
+        if not args.print_only:
+            record_fetch_error(os.path.abspath(args.output), detail)
         return 1
 
     if args.print_only:
@@ -197,6 +234,7 @@ def main() -> int:
         return 0
 
     atomic_json_write(os.path.abspath(args.output), normalized)
+    clear_fetch_error(os.path.abspath(args.output))
     five = normalized["five_hour"]["used_percent"]
     week = normalized["weekly"]["used_percent"]
     credits = normalized["reset_credits"]["available_count"]
