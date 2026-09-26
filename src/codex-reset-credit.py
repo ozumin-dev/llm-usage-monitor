@@ -22,6 +22,7 @@ import os
 import subprocess
 import sys
 import threading
+import uuid
 from datetime import datetime, timezone
 
 
@@ -121,6 +122,7 @@ def main() -> int:
     parser.add_argument("--consume", metavar="CREDIT_ID", help="consume a specific credit id (spends it; irreversible)")
     parser.add_argument("--reset-type", default="codexRateLimits")
     parser.add_argument("--yes", action="store_true", help="required confirmation for --consume")
+    parser.add_argument("--idempotency-key", help="idempotency key for --consume (default: a new UUID; reuse it when retrying)")
     parser.add_argument("--json", action="store_true", help="emit JSON instead of text")
     args = parser.parse_args()
 
@@ -129,10 +131,13 @@ def main() -> int:
             if not args.yes:
                 print("Refusing to consume without --yes (this spends a credit and is irreversible).", file=sys.stderr)
                 return 2
+            # The server requires idempotencyKey (codex-cli 0.153.4: "missing field `idempotencyKey`"; found 2026-09-15).
+            # A fresh UUID per invocation; a retry of the same call should reuse it, so it can be passed explicitly.
             result = rpc_call(
                 args.command,
                 "account/rateLimitResetCredit/consume",
-                {"creditId": args.consume, "resetType": args.reset_type},
+                {"creditId": args.consume, "resetType": args.reset_type,
+                 "idempotencyKey": args.idempotency_key or str(uuid.uuid4())},
                 args.timeout,
             )
             if args.json:
