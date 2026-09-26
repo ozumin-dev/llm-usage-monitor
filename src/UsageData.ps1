@@ -140,7 +140,8 @@ function Get-CodexUsageFromSessions {
         }
     }
 
-    $files = @($files | Sort-Object LastWriteTimeUtc -Descending | Select-Object -First $FilesToInspect)
+    $files = @($files | Sort-Object LastWriteTimeUtc -Descending)
+    if ($files.Count -gt $FilesToInspect) { $files = $files[0..($FilesToInspect - 1)] }
     foreach ($file in $files) {
         $lines = @(Get-Content -LiteralPath $file.FullName -Tail $TailLines -ErrorAction SilentlyContinue)
         for ($i = $lines.Count - 1; $i -ge 0; $i--) {
@@ -188,7 +189,9 @@ function Get-ClaudeUsage {
         )
     )
 
-    $selectedPath = $Paths | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
+    # Not `Select-Object -First`: it stops the pipeline with an internal
+    # exception that PowerShell logs as event 4100 "System error." every call.
+    $selectedPath = @($Paths | Where-Object { Test-Path -LiteralPath $_ })[0]
     if (-not $selectedPath) { return $null }
     try {
         $data = Get-Content -Raw -LiteralPath $selectedPath | ConvertFrom-Json -ErrorAction Stop
